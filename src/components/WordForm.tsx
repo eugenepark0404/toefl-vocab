@@ -119,7 +119,6 @@ export default function WordForm() {
           value={headword}
           autoFocus
           onChange={(e) => setHeadword(e.target.value)}
-          placeholder="e.g. ubiquitous"
         />
       </div>
 
@@ -129,7 +128,6 @@ export default function WordForm() {
           className="input"
           value={meaningKo}
           onChange={(e) => setMeaningKo(e.target.value)}
-          placeholder="어디에나 있는, 편재하는"
         />
       </div>
 
@@ -141,7 +139,6 @@ export default function WordForm() {
               className="input"
               value={s}
               onChange={(e) => setSynonyms(updateAt(synonyms, i, e.target.value))}
-              placeholder="e.g. omnipresent"
             />
             <button
               type="button"
@@ -179,7 +176,6 @@ export default function WordForm() {
               className="input"
               value={d.word}
               onChange={(e) => setDerivedWords(updateAt(derivedWords, i, { ...d, word: e.target.value }))}
-              placeholder="e.g. ubiquity"
             />
             <button
               type="button"
@@ -213,7 +209,6 @@ export default function WordForm() {
               rows={2}
               value={s}
               onChange={(e) => setExamples(updateAt(examples, i, e.target.value))}
-              placeholder="e.g. Smartphones have become ubiquitous in modern life."
             />
             <button
               type="button"
@@ -235,7 +230,6 @@ export default function WordForm() {
           className="input"
           value={testPoint}
           onChange={(e) => setTestPoint(e.target.value)}
-          placeholder="단어장에 있으면 작성, 없으면 비워두세요"
         />
       </div>
 
