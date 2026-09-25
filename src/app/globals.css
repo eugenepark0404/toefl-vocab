@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --border: #e5e7eb;
+  /* Used by .stars. Tailwind exposes this as a utility class too, but the star
+     row is plain CSS, so the value has to exist here as well. */
+  --star: #f5a623;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: #fafafa;
+  color: #111827;
+}
+
+.nav {
+  display: flex;
+  gap: 1.25rem;
+  padding: 1rem 1.5rem;
+  /* Wrap instead of overflowing: five links do not fit on a phone. */
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  background: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.nav a {
+  font-size: 0.95rem;
+  color: #374151;
+  text-decoration: none;
+}
+.nav a:hover {
+  color: #111827;
+  text-decoration: underline;
+}
+
+.main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: white;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.55rem 1.1rem;
+  border-radius: 8px;
+  background: #111827;
+  color: white;
+  font-size: 0.9rem;
+  border: none;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: white;
+  color: #111827;
+  border: 1px solid var(--border);
+}
+
+.input {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.stars {
+  color: var(--star);
+  letter-spacing: 1px;
+}
+
+textarea.input {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+/* Tap targets and spacing for phone use, which is the point of deploying this. */
+@media (max-width: 480px) {
+  .nav {
+    gap: 0.9rem;
+    padding: 0.75rem 1rem;
+  }
+  .nav a {
+    font-size: 0.9rem;
+  }
+  .btn {
+    padding: 0.6rem 1rem;
+  }
+}

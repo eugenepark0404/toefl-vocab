@@ -1,0 +1,10 @@
+node_modules
+.next
+.env
+.env.local
+.DS_Store
+*.log
+tsconfig.tsbuildinfo
+
+# Local storage backend: your own vocabulary, not source code.
+.data
