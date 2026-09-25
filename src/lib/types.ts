@@ -69,6 +69,10 @@ export interface ExamQuestionPayload {
   // blank_fill: the sentence with a blank, plus the form that belongs in it.
   blankedSentence?: string;
   correctSurfaceForm?: string;
+  // The opening letters given away, and how long the answer is. Without these
+  // the blank is a guess from context alone.
+  hintPrefix?: string;
+  answerLength?: number;
 }
 
 export interface WordFormInput {

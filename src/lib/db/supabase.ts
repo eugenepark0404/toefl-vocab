@@ -3,6 +3,7 @@ import type { Word } from '@/lib/types';
 import {
   DuplicateHeadwordError,
   type AttemptInput,
+  type TodayLogEntry,
   type NewWordRecord,
   type PlannedQuestion,
   type WordRepository,
@@ -175,6 +176,18 @@ export class SupabaseRepository implements WordRepository {
     return (data ?? []).map(normalise) as Word[];
   }
 
+  async listWordsByIds(ids: string[]): Promise<Word[]> {
+    if (ids.length === 0) return [];
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('words')
+      .select(WORD_SELECT)
+      .in('id', ids)
+      .order('created_at', { ascending: false });
+    if (error) fail(error.message, 'Failed to load words.');
+    return (data ?? []).map(normalise) as Word[];
+  }
+
   async listWordsWithQuestions(): Promise<WordWithQuestions[]> {
     const supabase = createServerSupabaseClient();
     const { data, error } = await supabase.from('words').select(WORD_SELECT_WITH_QUESTIONS);
@@ -184,14 +197,17 @@ export class SupabaseRepository implements WordRepository {
       .filter((w: any) => (w.exam_questions ?? []).length > 0) as WordWithQuestions[];
   }
 
-  async getTodayShownWordIds(day: string): Promise<string[]> {
+  async getTodayLog(day: string): Promise<TodayLogEntry[]> {
     const supabase = createServerSupabaseClient();
-    const { data, error } = await supabase.from('today_word_log').select('word_id').eq('shown_on', day);
+    const { data, error } = await supabase
+      .from('today_word_log')
+      .select('word_id, batch')
+      .eq('shown_on', day);
     if (error) fail(error.message, "Failed to load today's log.");
-    return (data ?? []).map((r) => r.word_id as string);
+    return (data ?? []).map((r) => ({ wordId: r.word_id as string, batch: (r.batch as number) ?? 1 }));
   }
 
-  async logTodayShown(wordIds: string[], day: string): Promise<void> {
+  async logTodayShown(wordIds: string[], day: string, batch: number): Promise<void> {
     if (wordIds.length === 0) return;
     const supabase = createServerSupabaseClient();
     // (word_id, shown_on) is unique. Two tabs opening the page at once would
@@ -199,7 +215,7 @@ export class SupabaseRepository implements WordRepository {
     const { error } = await supabase
       .from('today_word_log')
       .upsert(
-        wordIds.map((word_id) => ({ word_id, shown_on: day })),
+        wordIds.map((word_id) => ({ word_id, shown_on: day, batch })),
         { onConflict: 'word_id,shown_on', ignoreDuplicates: true }
       );
     if (error) fail(error.message, "Failed to record today's words.");

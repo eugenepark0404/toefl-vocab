@@ -75,10 +75,48 @@ export function findHeadwordInSentence(headword: string, sentence: string): Matc
   return null;
 }
 
+export interface BlankHint {
+  /** What goes into the sentence, e.g. "c__________" for "conspicuous". */
+  placeholder: string;
+  /** The revealed opening letters. */
+  prefix: string;
+  /** Total length of the answer, so the blank can be counted. */
+  length: number;
+}
+
+/**
+ * Build the blank for a fill-in-the-blank question.
+ *
+ * A bare "_____" is close to unanswerable: nothing says how long the word is or
+ * where it starts, and the student is guessing from the sentence alone. So the
+ * opening letter is revealed - two of them once the word reaches eight
+ * characters - and every remaining letter becomes one underscore, which makes
+ * the length countable.
+ *
+ * Non-letters are left visible, so a hyphenated form reads "w___-_____" rather
+ * than hiding its own shape.
+ */
+export function buildBlankHint(surfaceForm: string): BlankHint {
+  const chars = Array.from(surfaceForm);
+  // Never reveal the whole word, however short it is.
+  const revealCount = Math.min(chars.length >= 8 ? 2 : 1, Math.max(chars.length - 1, 0));
+
+  const placeholder = chars
+    .map((ch, i) => (i < revealCount ? ch : /[A-Za-z0-9]/.test(ch) ? '_' : ch))
+    .join('');
+
+  return { placeholder, prefix: chars.slice(0, revealCount).join(''), length: chars.length };
+}
+
 /** Replace the matched span with a blank, for fill-in-the-blank questions. */
-export function buildBlankedSentence(sentence: string, start: number, end: number): string {
+export function buildBlankedSentence(
+  sentence: string,
+  start: number,
+  end: number,
+  placeholder = '_____'
+): string {
   // Callers should never pass an empty span, but returning the sentence intact
   // would hand over the answer, so refuse instead.
   if (end <= start) return sentence;
-  return `${sentence.slice(0, start)}_____${sentence.slice(end)}`;
+  return `${sentence.slice(0, start)}${placeholder}${sentence.slice(end)}`;
 }

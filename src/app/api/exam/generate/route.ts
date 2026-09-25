@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, type WordWithQuestions } from '@/lib/db';
 import { pickWeightedWords, pickSynonymDistractors, shuffle } from '@/lib/examGenerator';
-import { buildBlankedSentence } from '@/lib/wordMatcher';
+import { buildBlankedSentence, buildBlankHint } from '@/lib/wordMatcher';
 import type { ExamQuestionPayload, QuestionType } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -77,13 +77,21 @@ function buildQuestionPayload(
     // A question is only created when the span is real (see planQuestions), but
     // guard anyway: blanking a zero-length span would print the answer in full.
     if (example && example.match_end > example.match_start) {
+      const hint = buildBlankHint(example.matched_surface_form);
       return {
         questionId: question.id,
         wordId: word.id,
         type: 'blank_fill',
         headword: word.headword,
-        blankedSentence: buildBlankedSentence(example.sentence, example.match_start, example.match_end),
+        blankedSentence: buildBlankedSentence(
+          example.sentence,
+          example.match_start,
+          example.match_end,
+          hint.placeholder
+        ),
         correctSurfaceForm: example.matched_surface_form,
+        hintPrefix: hint.prefix,
+        answerLength: hint.length,
       };
     }
   }

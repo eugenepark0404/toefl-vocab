@@ -9,7 +9,8 @@ It does three things:
 - **Register words** — headword, synonyms, derived words, example sentences and
   an optional exam note. Exam questions are generated automatically as you save.
 - **Today's words** — up to 30 flip cards a day, drawn from the words you
-  currently know least well.
+  currently know least well. Refreshing replays the same set; moving on to the
+  next 30 is an explicit button.
 - **Exam** — up to 45 questions a day, weighted so unfamiliar words come up more
   often. Your answers feed back into a per-word difficulty rating.
 
@@ -73,6 +74,14 @@ so a deployment without those variables will fail to save anything.
 Route handlers only ever call `getDb()`, so nothing above that line knows or
 cares which backend is active.
 
+### Today's words
+
+Reading the list is idempotent. Once a batch has been chosen for the day it is
+replayed on every later call, so a refresh — or React running the effect twice
+in development — shows the same cards rather than consuming them. Asking for
+more is a separate action, and replay returns only the current batch, so a
+refresh during round two does not silently reopen round one.
+
 ### Difficulty rating (stars)
 
 Stars run backwards from the usual convention — **more stars means you know the
@@ -111,7 +120,13 @@ Three question types are mixed:
 - **Choose the synonym** — multiple choice, graded automatically. Wrong options
   are drawn from other words' synonyms, preferring words whose meaning differs
   from the answer.
-- **Fill in the blank** — the example sentence with the headword removed.
+- **Fill in the blank** — the example sentence with the headword removed. The
+  opening letter is given (two once the word reaches eight characters) and each
+  remaining letter becomes one underscore, so the length is countable:
+  `The red building was co_________ among the gray offices.` A bare `_____` is
+  close to unanswerable. An exact match is graded automatically; anything else
+  reveals the answer and falls back to self-marking, so a defensible near-miss
+  is not forced to wrong.
 
 Each word starts at a random question type and rotates through the others on
 repeat appearances, so seeing a word twice means being asked two different ways.

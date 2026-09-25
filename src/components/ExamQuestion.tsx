@@ -15,8 +15,10 @@ interface Props {
  *   has too many valid phrasings to grade by string comparison, so the spec
  *   calls for self-checking here.
  * - synonym_choice: multiple choice, graded automatically.
- * - blank_fill: type the missing word, reveal, then mark yourself (an inflected
- *   form may be written several ways).
+ * - blank_fill: type the missing word. The opening letter and the length are
+ *   given, since a bare blank is a guess from context alone. An exact match is
+ *   graded automatically; anything else reveals the answer and falls back to
+ *   self-marking, because a defensible near-miss should not be forced to wrong.
  */
 export default function ExamQuestion({ question, onAnswered }: Props) {
   const [textAnswer, setTextAnswer] = useState('');
@@ -73,20 +75,34 @@ export default function ExamQuestion({ question, onAnswered }: Props) {
   }
 
   if (question.type === 'blank_fill') {
+    const correct = question.correctSurfaceForm ?? '';
+    const isExactMatch = textAnswer.trim().toLowerCase() === correct.trim().toLowerCase();
+
     return (
       <div className="card">
         <p style={{ marginBottom: 10 }}>빈칸에 들어갈 단어를 쓰세요.</p>
-        <p style={{ marginBottom: 12, lineHeight: 1.6 }}>{question.blankedSentence}</p>
+        <p style={{ marginBottom: 10, lineHeight: 1.8, fontSize: '1.05rem' }}>
+          {question.blankedSentence}
+        </p>
+        {question.hintPrefix && (
+          <p style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: 12 }}>
+            {question.hintPrefix}(으)로 시작하는 {question.answerLength}글자
+          </p>
+        )}
         {!revealed ? (
           <AnswerInput
             value={textAnswer}
             onChange={setTextAnswer}
-            onSubmit={() => setRevealed(true)}
+            onSubmit={() => {
+              // An exact match needs no self-check; skip straight on.
+              if (isExactMatch) onAnswered({ isCorrect: true, userAnswer: textAnswer });
+              else setRevealed(true);
+            }}
             placeholder="정답 입력"
           />
         ) : (
           <SelfCheck
-            correctAnswer={question.correctSurfaceForm ?? ''}
+            correctAnswer={correct}
             userAnswer={textAnswer}
             onSelect={(isCorrect) => onAnswered({ isCorrect, userAnswer: textAnswer })}
           />

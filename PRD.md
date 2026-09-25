@@ -55,8 +55,9 @@ material for:
 - **Flip cards**: the headword on the front; tap to turn it over for the
   meaning, synonyms, derived words, examples and exam note.
 - **30 a day.** After the last card, the whole set is listed again for review.
-- Words already shown today are logged and skipped, so pressing the button again
-  continues through the list rather than restarting it.
+- The day's batch is stable: reloading replays it rather than consuming it.
+  Continuing to the next 30 is an explicit button, and only the current batch is
+  replayed.
 
 ## 4. The exam
 
@@ -66,6 +67,10 @@ material for:
   immediate repeats, and no word may appear more than three times in a sitting.
   Below 15 registered words the exam is shorter than 45 questions rather than
   looping over the same handful.
+- **Fill-in-the-blank gives a hint.** The opening letter (two from eight
+  characters up) and one underscore per remaining letter. Without it the blank
+  is a guess from context alone. An exact match grades itself; anything else
+  falls back to self-marking.
 - **Written answers are self-marked.** A Korean meaning has too many valid
   phrasings to grade by string comparison, so the student types an answer,
   presses confirm, sees the correct answer, and states whether they got it

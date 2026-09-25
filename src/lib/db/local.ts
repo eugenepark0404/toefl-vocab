@@ -5,6 +5,7 @@ import type { Word } from '@/lib/types';
 import {
   DuplicateHeadwordError,
   type AttemptInput,
+  type TodayLogEntry,
   type NewWordRecord,
   type PlannedQuestion,
   type WordRepository,
@@ -61,7 +62,7 @@ interface AttemptRow {
   user_answer: string | null;
   answered_at: string;
 }
-interface TodayLogRow { id: string; word_id: string; shown_on: string }
+interface TodayLogRow { id: string; word_id: string; shown_on: string; batch?: number }
 
 interface Database {
   words: WordRow[];
@@ -262,6 +263,16 @@ export class LocalRepository implements WordRepository {
       .map((w) => assemble(db, w));
   }
 
+  async listWordsByIds(ids: string[]): Promise<Word[]> {
+    if (ids.length === 0) return [];
+    const db = await readDb();
+    const wanted = new Set(ids);
+    return db.words
+      .filter((w) => wanted.has(w.id))
+      .sort(newestFirst)
+      .map((w) => assemble(db, w));
+  }
+
   async listWordsWithQuestions(): Promise<WordWithQuestions[]> {
     const db = await readDb();
     return db.words
@@ -279,17 +290,22 @@ export class LocalRepository implements WordRepository {
       .filter((w) => w.exam_questions.length > 0);
   }
 
-  async getTodayShownWordIds(day: string): Promise<string[]> {
+  async getTodayLog(day: string): Promise<TodayLogEntry[]> {
     const db = await readDb();
-    return db.today_word_log.filter((r) => r.shown_on === day).map((r) => r.word_id);
+    return db.today_word_log
+      .filter((r) => r.shown_on === day)
+      // Rows written before batches existed count as the first batch.
+      .map((r) => ({ wordId: r.word_id, batch: r.batch ?? 1 }));
   }
 
-  async logTodayShown(wordIds: string[], day: string): Promise<void> {
+  async logTodayShown(wordIds: string[], day: string, batch: number): Promise<void> {
     if (wordIds.length === 0) return;
     await transaction((db) => {
       for (const wordId of wordIds) {
         const already = db.today_word_log.some((r) => r.word_id === wordId && r.shown_on === day);
-        if (!already) db.today_word_log.push({ id: randomUUID(), word_id: wordId, shown_on: day });
+        if (!already) {
+          db.today_word_log.push({ id: randomUUID(), word_id: wordId, shown_on: day, batch });
+        }
       }
     });
   }

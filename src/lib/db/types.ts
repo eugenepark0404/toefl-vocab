@@ -29,6 +29,11 @@ export interface PlannedQuestion {
   example_index: number | null;
 }
 
+export interface TodayLogEntry {
+  wordId: string;
+  batch: number;
+}
+
 export interface AttemptInput {
   questionId: string;
   wordId: string;
@@ -59,12 +64,16 @@ export interface WordRepository {
 
   /** Words at the given star levels, for "Today's words". */
   listWordsByStars(stars: number[]): Promise<Word[]>;
+  /** Words by id, skipping ids that no longer exist. Used to replay the set
+   *  already chosen for today so a refresh shows the same cards. */
+  listWordsByIds(ids: string[]): Promise<Word[]>;
   /** Only words that have at least one exam question attached. */
   listWordsWithQuestions(): Promise<WordWithQuestions[]>;
 
-  /** `day` is an ISO date (YYYY-MM-DD) in the user's local timezone. */
-  getTodayShownWordIds(day: string): Promise<string[]>;
-  logTodayShown(wordIds: string[], day: string): Promise<void>;
+  /** What has been shown today, with the batch each word belongs to.
+   *  `day` is an ISO date (YYYY-MM-DD) in the user's local timezone. */
+  getTodayLog(day: string): Promise<TodayLogEntry[]>;
+  logTodayShown(wordIds: string[], day: string, batch: number): Promise<void>;
 
   createExamSession(): Promise<string>;
   completeExamSession(sessionId: string): Promise<void>;

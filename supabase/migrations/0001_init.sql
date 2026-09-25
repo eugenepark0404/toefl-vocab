@@ -109,6 +109,9 @@ create table if not exists today_word_log (
   id uuid primary key default gen_random_uuid(),
   word_id uuid not null references words(id) on delete cascade,
   shown_on date not null default current_date,
+  -- Which round of the day this word belongs to. Reloading the page replays the
+  -- current batch; asking for more words starts the next one.
+  batch int not null default 1,
   unique (word_id, shown_on)
 );
 
