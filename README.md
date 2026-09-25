@@ -16,6 +16,11 @@ It does three things:
 
 ## Quick start
 
+On Windows, double-click `start-app.bat`. It installs and builds on first run,
+then starts the app and opens it in the browser. Closing the window stops it.
+
+Otherwise:
+
 ```bash
 npm install
 npm run dev
@@ -203,6 +208,8 @@ src/
     difficulty.ts                 Star calculation
     examGenerator.ts              Weighted drawing and distractor selection
     seedWords.ts                  20 starter words
+start-app.bat                     Double-click launcher (Windows)
+scripts/start-app.ps1             What the launcher actually runs
 scripts/migrate.mjs               Applies the SQL migrations (npm run migrate)
 supabase/migrations/              Postgres schema, applied in filename order
 PRD.md                            What was specified and what was decided
