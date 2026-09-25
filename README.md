@@ -35,15 +35,41 @@ machine. For the same words on your phone, see below.
 Cross-device sync needs a shared database. The app switches to Supabase
 automatically as soon as it is configured; nothing else changes.
 
-1. Create a project at <https://supabase.com>.
-2. Open **SQL Editor** and run `supabase/migrations/0001_init.sql`. Every table,
-   index and trigger is in that one file.
-3. Copy `.env.example` to `.env.local` and fill in the two values from
-   **Project Settings → API**:
-   - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-   - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY`
-4. Restart the dev server. The "local storage mode" notice on the home page
-   disappears once Supabase is in use.
+**1. Create a Supabase project** at <https://supabase.com>. Pick a region near
+you and set a database password — you will need that password in step 3, and it
+is not one of the API keys.
+
+**2. Collect three values.** The dashboard layout changes from time to time, so
+these are described by what they are rather than where the button is. If the
+navigation is hard to follow, the project settings pages are reachable directly
+at `https://supabase.com/dashboard/project/<your-project-ref>/settings/api` and
+`.../settings/database`, and most dashboards have a search or command palette
+(Ctrl/Cmd-K) that will jump to "API" or "Database".
+
+| Value | Where | Goes into |
+| --- | --- | --- |
+| Project URL | Settings → API | `NEXT_PUBLIC_SUPABASE_URL` |
+| `service_role` key | Settings → API (needs revealing) | `SUPABASE_SERVICE_ROLE_KEY` |
+| Connection string (URI) | Settings → Database | `DATABASE_URL` |
+
+Put all three in `.env.local` (copy `.env.example`). In the connection string,
+replace `[YOUR-PASSWORD]` with the database password from step 1.
+
+**3. Create the tables:**
+
+```bash
+npm run migrate
+```
+
+This applies everything in `supabase/migrations/` over the connection string,
+so there is no need to find the SQL editor in the dashboard. The migrations use
+`if not exists` throughout and are safe to re-run; run this again whenever the
+schema changes. If you prefer the dashboard, pasting each file into the SQL
+editor and running it does exactly the same thing.
+
+**4. Restart the dev server** and open the app. The "local storage mode" notice
+on the home page disappears once Supabase is in use — that notice is the quickest
+way to tell which backend you are on.
 
 > The `service_role` key bypasses row level security, so it must never reach a
 > browser. It has no `NEXT_PUBLIC_` prefix for exactly that reason, and every
@@ -177,7 +203,8 @@ src/
     difficulty.ts                 Star calculation
     examGenerator.ts              Weighted drawing and distractor selection
     seedWords.ts                  20 starter words
-supabase/migrations/0001_init.sql Full Postgres schema
+scripts/migrate.mjs               Applies the SQL migrations (npm run migrate)
+supabase/migrations/              Postgres schema, applied in filename order
 PRD.md                            What was specified and what was decided
 IMPLEMENTATION_PLAN.md            What is done and what is left
 ```

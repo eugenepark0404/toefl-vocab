@@ -22,14 +22,26 @@ end.
 - [x] Duplicate headwords rejected with a readable message (409) instead of a
       raw database error.
 - [x] Mobile viewport and layout.
+- [x] `npm run migrate`, so setting up the database does not depend on finding
+      the SQL editor in a dashboard that keeps changing.
+- [x] Schema verified against a real Postgres engine: migrations apply, are
+      idempotent, and the constraints the app relies on (case-insensitive
+      unique headword, one log row per word per day, the question-type enum,
+      the star range, the updated_at trigger, cascade delete) all hold.
 
 ## Phase 1 — before deploying
 
-- [ ] Create a Supabase project and run `supabase/migrations/0001_init.sql`.
-- [ ] Set `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` locally and
-      in Vercel. The local file backend cannot work on a serverless deployment.
+- [ ] Create a Supabase project, put the three values from the README in
+      `.env.local`, and run `npm run migrate`.
+- [ ] Run the app locally against Supabase first and confirm the "local storage
+      mode" notice is gone. The Supabase client code has not been exercised
+      against a live instance yet; the schema has (see below).
+- [ ] Set `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in Vercel.
+      The local file backend cannot work on a serverless deployment.
 - [ ] After deploying, register a word on the laptop and confirm it appears on
       the phone.
+- [ ] Decide what to do about the lack of authentication. On a public URL,
+      anyone with the link can read, add and delete words.
 
 ## Phase 2 — registration
 
