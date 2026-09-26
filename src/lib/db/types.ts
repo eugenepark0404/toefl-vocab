@@ -1,7 +1,50 @@
-import type { PartOfSpeech, QuestionType, Word, ExamQuestionRow } from '@/lib/types';
+import type { Example, ExamQuestionRow, PartOfSpeech, Word } from '@/lib/types';
 
-/** A word plus its auto-generated exam questions. Used by the exam generator. */
-export type WordWithQuestions = Word & { exam_questions: ExamQuestionRow[] };
+/**
+ * One sense, flattened with everything the exam generator needs about it.
+ *
+ * The exam draws senses, not words: a word with three meanings has three
+ * things to learn, and each is rated separately. Assembling this shape in the
+ * repository keeps the route free of backend-specific joins, and guarantees
+ * both backends hand the generator identical input.
+ */
+export interface SenseForExam {
+  senseId: string;
+  wordId: string;
+  headword: string;
+  meaning_ko: string;
+  difficulty_stars: 1 | 2 | 3;
+  /** 0-based position among the word's senses, and how many there are. */
+  senseIndex: number;
+  senseTotal: number;
+  /** The word's other meanings, for context when revealing an answer. */
+  otherMeanings: string[];
+  synonyms: string[];
+  /** Synonyms of this word's OTHER senses. Never usable as wrong answers. */
+  siblingSynonyms: string[];
+  examples: Example[];
+  questions: ExamQuestionRow[];
+}
+
+/** One exam question to create alongside a new sense. */
+export interface PlannedQuestion {
+  question_type: ExamQuestionRow['question_type'];
+  /** Index into the sense's own `examples`; only set for `blank_fill`. */
+  example_index: number | null;
+}
+
+export interface NewSenseRecord {
+  meaning_ko: string;
+  test_point: string | null;
+  synonyms: string[];
+  examples: {
+    sentence: string;
+    matched_surface_form: string;
+    match_start: number;
+    match_end: number;
+  }[];
+  questions: PlannedQuestion[];
+}
 
 /**
  * A word that has been validated and had its example sentences analysed, but
@@ -10,23 +53,8 @@ export type WordWithQuestions = Word & { exam_questions: ExamQuestionRow[] };
  */
 export interface NewWordRecord {
   headword: string;
-  meaning_ko: string;
-  test_point: string | null;
-  synonyms: string[];
   derived_words: { pos: PartOfSpeech; derived_word: string }[];
-  examples: {
-    sentence: string;
-    matched_surface_form: string;
-    match_start: number;
-    match_end: number;
-  }[];
-}
-
-/** One exam question to create alongside a new word. */
-export interface PlannedQuestion {
-  question_type: QuestionType;
-  /** Index into `NewWordRecord.examples`; only set for `blank_fill`. */
-  example_index: number | null;
+  senses: NewSenseRecord[];
 }
 
 export interface TodayLogEntry {
@@ -37,6 +65,7 @@ export interface TodayLogEntry {
 export interface AttemptInput {
   questionId: string;
   wordId: string;
+  senseId: string;
   isCorrect: boolean;
   userAnswer?: string;
 }
@@ -57,30 +86,30 @@ export interface WordRepository {
 
   listWords(): Promise<Word[]>;
   getWord(id: string): Promise<Word | null>;
-  /** Case-insensitive, so `Ubiquitous` collides with `ubiquitous`. */
+  /** Case-insensitive, so `Exploit` collides with `exploit`. */
   findWordByHeadword(headword: string): Promise<Word | null>;
-  createWord(record: NewWordRecord, questions: PlannedQuestion[]): Promise<Word>;
+  createWord(record: NewWordRecord): Promise<Word>;
   deleteWord(id: string): Promise<void>;
 
-  /** Words at the given star levels, for "Today's words". */
+  /** Words with at least one sense at the given star levels, for review. */
   listWordsByStars(stars: number[]): Promise<Word[]>;
   /** Words by id, skipping ids that no longer exist. Used to replay the set
    *  already chosen for today so a refresh shows the same cards. */
   listWordsByIds(ids: string[]): Promise<Word[]>;
-  /** Only words that have at least one exam question attached. */
-  listWordsWithQuestions(): Promise<WordWithQuestions[]>;
 
-  /** What has been shown today, with the batch each word belongs to.
-   *  `day` is an ISO date (YYYY-MM-DD) in the user's local timezone. */
+  /** Every sense that has at least one exam question attached. */
+  listSensesForExam(): Promise<SenseForExam[]>;
+
+  /** `day` is an ISO date (YYYY-MM-DD) in the user's local timezone. */
   getTodayLog(day: string): Promise<TodayLogEntry[]>;
   logTodayShown(wordIds: string[], day: string, batch: number): Promise<void>;
 
   createExamSession(): Promise<string>;
   completeExamSession(sessionId: string): Promise<void>;
   recordAttempts(sessionId: string, attempts: AttemptInput[]): Promise<void>;
-  /** Correct/incorrect flags for one word, ordered oldest to newest. */
-  getAttemptHistory(wordId: string): Promise<boolean[]>;
-  updateWordStars(wordId: string, stars: 1 | 2 | 3): Promise<void>;
+  /** Correct/incorrect flags for one sense, ordered oldest to newest. */
+  getSenseAttemptHistory(senseId: string): Promise<boolean[]>;
+  updateSenseStars(senseId: string, stars: 1 | 2 | 3): Promise<void>;
 }
 
 /** Thrown when a headword already exists, so routes can answer 409 not 500. */

@@ -1,15 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { Word } from '@/lib/types';
+import type { Sense, Word } from '@/lib/types';
 import {
   DuplicateHeadwordError,
   type AttemptInput,
-  type TodayLogEntry,
   type NewWordRecord,
-  type PlannedQuestion,
+  type SenseForExam,
+  type TodayLogEntry,
   type WordRepository,
-  type WordWithQuestions,
 } from '@/lib/db/types';
 
 /**
@@ -28,17 +27,27 @@ import {
 interface WordRow {
   id: string;
   headword: string;
+  created_at: string;
+  updated_at: string;
+  // Pre-senses fields. Still read by the migration below, never written.
+  meaning_ko?: string;
+  test_point?: string | null;
+  difficulty_stars?: 1 | 2 | 3;
+}
+interface SenseRow {
+  id: string;
+  word_id: string;
   meaning_ko: string;
   test_point: string | null;
   difficulty_stars: 1 | 2 | 3;
-  created_at: string;
-  updated_at: string;
+  position: number;
 }
-interface SynonymRow { id: string; word_id: string; synonym: string; position: number }
+interface SynonymRow { id: string; word_id: string; sense_id: string; synonym: string; position: number }
 interface DerivedRow { id: string; word_id: string; pos: string; derived_word: string; position: number }
 interface ExampleRow {
   id: string;
   word_id: string;
+  sense_id: string;
   sentence: string;
   matched_surface_form: string;
   match_start: number;
@@ -48,6 +57,7 @@ interface ExampleRow {
 interface QuestionRow {
   id: string;
   word_id: string;
+  sense_id: string;
   question_type: string;
   example_id: string | null;
   created_at: string;
@@ -58,6 +68,7 @@ interface AttemptRow {
   session_id: string | null;
   question_id: string;
   word_id: string;
+  sense_id: string;
   is_correct: boolean;
   user_answer: string | null;
   answered_at: string;
@@ -66,6 +77,7 @@ interface TodayLogRow { id: string; word_id: string; shown_on: string; batch?: n
 
 interface Database {
   words: WordRow[];
+  senses: SenseRow[];
   synonyms: SynonymRow[];
   derived_words: DerivedRow[];
   examples: ExampleRow[];
@@ -75,29 +87,84 @@ interface Database {
   today_word_log: TodayLogRow[];
 }
 
-const EMPTY_DB: Database = {
-  words: [],
-  synonyms: [],
-  derived_words: [],
-  examples: [],
-  exam_questions: [],
-  exam_sessions: [],
-  exam_attempts: [],
-  today_word_log: [],
-};
-
 export function localDbPath(): string {
   return process.env.LOCAL_DB_PATH
     ? path.resolve(process.env.LOCAL_DB_PATH)
     : path.join(process.cwd(), '.data', 'toefl-vocab.json');
 }
 
+/**
+ * Bring a file written before senses existed up to the current shape.
+ *
+ * Words used to carry the meaning, exam note and star rating directly, with
+ * synonyms and examples hanging off the word. Each such word becomes a word
+ * with exactly one sense, and its children are re-pointed at that sense, so
+ * nothing the user typed is lost. Returns true if anything changed.
+ */
+function migrate(db: Database): boolean {
+  let changed = false;
+
+  for (const word of db.words) {
+    const hasSense = db.senses.some((s) => s.word_id === word.id);
+    if (hasSense) continue;
+
+    const sense: SenseRow = {
+      id: randomUUID(),
+      word_id: word.id,
+      meaning_ko: word.meaning_ko ?? '',
+      test_point: word.test_point ?? null,
+      difficulty_stars: word.difficulty_stars ?? 3,
+      position: 0,
+    };
+    db.senses.push(sense);
+
+    for (const row of db.synonyms) if (row.word_id === word.id && !row.sense_id) row.sense_id = sense.id;
+    for (const row of db.examples) if (row.word_id === word.id && !row.sense_id) row.sense_id = sense.id;
+    for (const row of db.exam_questions) if (row.word_id === word.id && !row.sense_id) row.sense_id = sense.id;
+    for (const row of db.exam_attempts) if (row.word_id === word.id && !row.sense_id) row.sense_id = sense.id;
+
+    delete word.meaning_ko;
+    delete word.test_point;
+    delete word.difficulty_stars;
+    changed = true;
+  }
+
+  return changed;
+}
+
+function emptyDb(): Database {
+  return {
+    words: [],
+    senses: [],
+    synonyms: [],
+    derived_words: [],
+    examples: [],
+    exam_questions: [],
+    exam_sessions: [],
+    exam_attempts: [],
+    today_word_log: [],
+  };
+}
+
 async function readDb(): Promise<Database> {
   try {
     const raw = await readFile(localDbPath(), 'utf8');
-    return { ...EMPTY_DB, ...(JSON.parse(raw) as Partial<Database>) };
+    const parsed = JSON.parse(raw) as Partial<Database>;
+    // Each key gets its own fresh array. Spreading a shared constant would
+    // hand every read the SAME array for any key the file is missing, so a
+    // migration writing into it would leak across reads - and the second read
+    // would then think the work was already done and skip it.
+    const db = emptyDb();
+    for (const key of Object.keys(db) as (keyof Database)[]) {
+      const rows = parsed[key];
+      if (Array.isArray(rows)) (db[key] as unknown[]) = rows;
+    }
+    // Migrate on read so an older file works immediately; the next write
+    // persists the new shape.
+    migrate(db);
+    return db;
   } catch (err: any) {
-    if (err?.code === 'ENOENT') return JSON.parse(JSON.stringify(EMPTY_DB)) as Database;
+    if (err?.code === 'ENOENT') return emptyDb();
     throw err;
   }
 }
@@ -132,30 +199,19 @@ function transaction<T>(fn: (db: Database) => T | Promise<T>): Promise<T> {
 const byPosition = <T extends { position: number }>(a: T, b: T) => a.position - b.position;
 const newestFirst = (a: WordRow, b: WordRow) => b.created_at.localeCompare(a.created_at);
 
-function assemble(db: Database, row: WordRow): Word {
+function assembleSense(db: Database, row: SenseRow): Sense {
   return {
     id: row.id,
-    headword: row.headword,
     meaning_ko: row.meaning_ko,
     test_point: row.test_point,
     difficulty_stars: row.difficulty_stars,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    position: row.position,
     synonyms: db.synonyms
-      .filter((s) => s.word_id === row.id)
+      .filter((s) => s.sense_id === row.id)
       .sort(byPosition)
       .map((s) => ({ id: s.id, synonym: s.synonym, position: s.position })),
-    derived_words: db.derived_words
-      .filter((d) => d.word_id === row.id)
-      .sort(byPosition)
-      .map((d) => ({
-        id: d.id,
-        pos: d.pos as Word['derived_words'][number]['pos'],
-        derived_word: d.derived_word,
-        position: d.position,
-      })),
     examples: db.examples
-      .filter((e) => e.word_id === row.id)
+      .filter((e) => e.sense_id === row.id)
       .sort(byPosition)
       .map((e) => ({
         id: e.id,
@@ -165,6 +221,28 @@ function assemble(db: Database, row: WordRow): Word {
         match_end: e.match_end,
         position: e.position,
       })),
+  };
+}
+
+function assemble(db: Database, row: WordRow): Word {
+  return {
+    id: row.id,
+    headword: row.headword,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    derived_words: db.derived_words
+      .filter((d) => d.word_id === row.id)
+      .sort(byPosition)
+      .map((d) => ({
+        id: d.id,
+        pos: d.pos as Word['derived_words'][number]['pos'],
+        derived_word: d.derived_word,
+        position: d.position,
+      })),
+    senses: db.senses
+      .filter((s) => s.word_id === row.id)
+      .sort(byPosition)
+      .map((s) => assembleSense(db, s)),
   };
 }
 
@@ -189,7 +267,7 @@ export class LocalRepository implements WordRepository {
     return row ? assemble(db, row) : null;
   }
 
-  async createWord(record: NewWordRecord, questions: PlannedQuestion[]): Promise<Word> {
+  async createWord(record: NewWordRecord): Promise<Word> {
     return transaction((db) => {
       const target = record.headword.toLowerCase();
       if (db.words.some((w) => w.headword.toLowerCase() === target)) {
@@ -200,18 +278,11 @@ export class LocalRepository implements WordRepository {
       const word: WordRow = {
         id: randomUUID(),
         headword: record.headword,
-        meaning_ko: record.meaning_ko,
-        test_point: record.test_point,
-        // New words start at 3 stars: no exam history yet, so treat as unfamiliar.
-        difficulty_stars: 3,
         created_at: now,
         updated_at: now,
       };
       db.words.push(word);
 
-      record.synonyms.forEach((synonym, position) => {
-        db.synonyms.push({ id: randomUUID(), word_id: word.id, synonym, position });
-      });
       record.derived_words.forEach((d, position) => {
         db.derived_words.push({
           id: randomUUID(),
@@ -222,19 +293,43 @@ export class LocalRepository implements WordRepository {
         });
       });
 
-      const exampleIds = record.examples.map((e, position) => {
-        const id = randomUUID();
-        db.examples.push({ id, word_id: word.id, position, ...e });
-        return id;
-      });
-
-      questions.forEach((q) => {
-        db.exam_questions.push({
+      record.senses.forEach((senseRecord, sensePosition) => {
+        const sense: SenseRow = {
           id: randomUUID(),
           word_id: word.id,
-          question_type: q.question_type,
-          example_id: q.example_index === null ? null : exampleIds[q.example_index] ?? null,
-          created_at: now,
+          meaning_ko: senseRecord.meaning_ko,
+          test_point: senseRecord.test_point,
+          // A new sense starts at 3 stars: no exam history, so treat as unfamiliar.
+          difficulty_stars: 3,
+          position: sensePosition,
+        };
+        db.senses.push(sense);
+
+        senseRecord.synonyms.forEach((synonym, position) => {
+          db.synonyms.push({
+            id: randomUUID(),
+            word_id: word.id,
+            sense_id: sense.id,
+            synonym,
+            position,
+          });
+        });
+
+        const exampleIds = senseRecord.examples.map((e, position) => {
+          const id = randomUUID();
+          db.examples.push({ id, word_id: word.id, sense_id: sense.id, position, ...e });
+          return id;
+        });
+
+        senseRecord.questions.forEach((q) => {
+          db.exam_questions.push({
+            id: randomUUID(),
+            word_id: word.id,
+            sense_id: sense.id,
+            question_type: q.question_type,
+            example_id: q.example_index === null ? null : exampleIds[q.example_index] ?? null,
+            created_at: now,
+          });
         });
       });
 
@@ -246,6 +341,7 @@ export class LocalRepository implements WordRepository {
     await transaction((db) => {
       // Mirrors `on delete cascade` in the Postgres schema.
       db.words = db.words.filter((w) => w.id !== id);
+      db.senses = db.senses.filter((r) => r.word_id !== id);
       db.synonyms = db.synonyms.filter((r) => r.word_id !== id);
       db.derived_words = db.derived_words.filter((r) => r.word_id !== id);
       db.examples = db.examples.filter((r) => r.word_id !== id);
@@ -257,8 +353,12 @@ export class LocalRepository implements WordRepository {
 
   async listWordsByStars(stars: number[]): Promise<Word[]> {
     const db = await readDb();
+    // A word is due for review if ANY of its senses is; the card shows them all.
+    const dueWordIds = new Set(
+      db.senses.filter((s) => stars.includes(s.difficulty_stars)).map((s) => s.word_id)
+    );
     return db.words
-      .filter((w) => stars.includes(w.difficulty_stars))
+      .filter((w) => dueWordIds.has(w.id))
       .sort(newestFirst)
       .map((w) => assemble(db, w));
   }
@@ -273,21 +373,46 @@ export class LocalRepository implements WordRepository {
       .map((w) => assemble(db, w));
   }
 
-  async listWordsWithQuestions(): Promise<WordWithQuestions[]> {
+  async listSensesForExam(): Promise<SenseForExam[]> {
     const db = await readDb();
-    return db.words
-      .map((row) => ({
-        ...assemble(db, row),
-        exam_questions: db.exam_questions
-          .filter((q) => q.word_id === row.id)
+    const out: SenseForExam[] = [];
+
+    for (const word of db.words) {
+      const senses = db.senses.filter((s) => s.word_id === word.id).sort(byPosition);
+      const assembled = senses.map((s) => assembleSense(db, s));
+
+      assembled.forEach((sense, index) => {
+        const questions = db.exam_questions
+          .filter((q) => q.sense_id === sense.id)
           .map((q) => ({
             id: q.id,
             word_id: q.word_id,
-            question_type: q.question_type as WordWithQuestions['exam_questions'][number]['question_type'],
+            sense_id: q.sense_id,
+            question_type: q.question_type as SenseForExam['questions'][number]['question_type'],
             example_id: q.example_id,
-          })),
-      }))
-      .filter((w) => w.exam_questions.length > 0);
+          }));
+        if (questions.length === 0) return;
+
+        out.push({
+          senseId: sense.id,
+          wordId: word.id,
+          headword: word.headword,
+          meaning_ko: sense.meaning_ko,
+          difficulty_stars: sense.difficulty_stars,
+          senseIndex: index,
+          senseTotal: assembled.length,
+          otherMeanings: assembled.filter((_, i) => i !== index).map((s) => s.meaning_ko),
+          synonyms: sense.synonyms.map((s) => s.synonym),
+          siblingSynonyms: assembled
+            .filter((_, i) => i !== index)
+            .flatMap((s) => s.synonyms.map((x) => x.synonym)),
+          examples: sense.examples,
+          questions,
+        });
+      });
+    }
+
+    return out;
   }
 
   async getTodayLog(day: string): Promise<TodayLogEntry[]> {
@@ -335,6 +460,7 @@ export class LocalRepository implements WordRepository {
           session_id: sessionId,
           question_id: a.questionId,
           word_id: a.wordId,
+          sense_id: a.senseId,
           is_correct: a.isCorrect,
           user_answer: a.userAnswer ?? null,
           // Stagger by index so answers from one submission keep the order they
@@ -345,21 +471,21 @@ export class LocalRepository implements WordRepository {
     });
   }
 
-  async getAttemptHistory(wordId: string): Promise<boolean[]> {
+  async getSenseAttemptHistory(senseId: string): Promise<boolean[]> {
     const db = await readDb();
     return db.exam_attempts
-      .filter((a) => a.word_id === wordId)
+      .filter((a) => a.sense_id === senseId)
       .sort((a, b) => a.answered_at.localeCompare(b.answered_at))
       .map((a) => a.is_correct);
   }
 
-  async updateWordStars(wordId: string, stars: 1 | 2 | 3): Promise<void> {
+  async updateSenseStars(senseId: string, stars: 1 | 2 | 3): Promise<void> {
     await transaction((db) => {
-      const word = db.words.find((w) => w.id === wordId);
-      if (word) {
-        word.difficulty_stars = stars;
-        word.updated_at = new Date().toISOString();
-      }
+      const sense = db.senses.find((s) => s.id === senseId);
+      if (!sense) return;
+      sense.difficulty_stars = stars;
+      const word = db.words.find((w) => w.id === sense.word_id);
+      if (word) word.updated_at = new Date().toISOString();
     });
   }
 }

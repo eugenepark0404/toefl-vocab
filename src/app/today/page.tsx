@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { Word } from '@/lib/types';
+import { meaningSummary, type Word } from '@/lib/types';
 import FlashCard from '@/components/FlashCard';
 
 interface TodayResponse {
@@ -65,7 +65,7 @@ export default function TodayPage() {
       <div>
         <h1 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>오늘의 단어</h1>
         <p style={{ color: '#6b7280', lineHeight: 1.7 }}>
-          복습할 단어가 없습니다. 별 2~3개인 단어가 대상이며, 단어를 새로 등록하거나 시험을
+          복습할 단어가 없습니다. 별 2~3개인 뜻이 대상이며, 단어를 새로 등록하거나 시험을
           보면 별점이 갱신됩니다.
         </p>
       </div>
@@ -83,7 +83,7 @@ export default function TodayPage() {
           {words.map((w) => (
             <div key={w.id} className="card">
               <strong>{w.headword}</strong>
-              <span style={{ color: '#6b7280', marginLeft: 10 }}>{w.meaning_ko}</span>
+              <span style={{ color: '#6b7280', marginLeft: 10 }}>{meaningSummary(w)}</span>
             </div>
           ))}
         </div>

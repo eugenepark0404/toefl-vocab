@@ -1,14 +1,14 @@
 import Link from 'next/link';
 import SeedButton from '@/components/SeedButton';
 import { getDb, storageBackend } from '@/lib/db';
-import type { Word } from '@/lib/types';
+import { worstStars, type Word } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 const LINKS = [
-  { href: '/words/new', title: '단어 등록', desc: '표제어, 동의어, 파생어, 예문, 출제포인트를 입력해 단어를 추가합니다.' },
-  { href: '/today', title: '오늘의 단어', desc: '별 2~3개인 단어를 카드 퀴즈(최대 30개)로 복습합니다.' },
-  { href: '/exam', title: '시험', desc: '별점 가중치를 반영해 하루 45문제를 출제합니다.' },
+  { href: '/words/new', title: '단어 등록', desc: '한 단어에 여러 뜻을 등록하고, 뜻마다 동의어와 예문을 붙입니다.' },
+  { href: '/today', title: '오늘의 단어', desc: '별 2~3개인 뜻이 있는 단어를 카드 퀴즈(최대 30개)로 복습합니다.' },
+  { href: '/exam', title: '시험', desc: '뜻 단위로 별점 가중치를 반영해 하루 45문제를 출제합니다.' },
   { href: '/words', title: '등록된 단어', desc: '지금까지 등록한 모든 단어를 검색하고 확인합니다.' },
 ];
 
@@ -23,7 +23,7 @@ export default async function HomePage() {
     errorMsg = err.message;
   }
 
-  const dueToday = words.filter((w) => w.difficulty_stars >= 2).length;
+  const dueToday = words.filter((w) => worstStars(w) >= 2).length;
 
   return (
     <div>
@@ -33,7 +33,8 @@ export default async function HomePage() {
         <p style={{ color: '#dc2626', marginBottom: '1.5rem' }}>{errorMsg}</p>
       ) : (
         <p style={{ color: '#6b7280', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-          등록된 단어 {words.length}개 · 복습 대상 {dueToday}개
+          등록된 단어 {words.length}개 · 뜻 {words.reduce((n, w) => n + w.senses.length, 0)}개 ·
+          복습 대상 {dueToday}개
         </p>
       )}
 

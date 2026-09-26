@@ -2,11 +2,9 @@
 
 import { useState } from 'react';
 import type { Word } from '@/lib/types';
-import { PART_OF_SPEECH_OPTIONS } from '@/lib/types';
+import { PART_OF_SPEECH_OPTIONS, meaningSummary, worstStars } from '@/lib/types';
+import SenseDetail, { starsLabel } from '@/components/SenseDetail';
 
-function starsLabel(n: 1 | 2 | 3) {
-  return '★'.repeat(n) + '☆'.repeat(3 - n);
-}
 function posLabel(pos: string) {
   return PART_OF_SPEECH_OPTIONS.find((o) => o.value === pos)?.label ?? pos;
 }
@@ -17,9 +15,10 @@ interface Props {
   deleting?: boolean;
 }
 
-/** Collapsed: headword, meaning, stars. Expanded: everything else. */
+/** Collapsed: headword, all meanings, worst star. Expanded: each sense in full. */
 export default function WordCard({ word, onDelete, deleting }: Props) {
   const [open, setOpen] = useState(false);
+  const senseCount = word.senses.length;
 
   return (
     <div className="card">
@@ -38,10 +37,26 @@ export default function WordCard({ word, onDelete, deleting }: Props) {
       >
         <div>
           <strong>{word.headword}</strong>
-          <span style={{ color: '#6b7280', marginLeft: 10 }}>{word.meaning_ko}</span>
+          {senseCount > 1 && (
+            <span
+              style={{
+                fontSize: '0.7rem',
+                background: '#eef2ff',
+                color: '#4338ca',
+                borderRadius: 4,
+                padding: '2px 5px',
+                marginLeft: 6,
+              }}
+            >
+              뜻 {senseCount}
+            </span>
+          )}
+          <span style={{ color: '#6b7280', marginLeft: 10 }}>{meaningSummary(word)}</span>
         </div>
+        {/* The worst sense sets the badge: a word is only "known" once every
+            meaning of it is. */}
         <span className="stars" style={{ whiteSpace: 'nowrap' }}>
-          {starsLabel(word.difficulty_stars)}
+          {starsLabel(worstStars(word))}
         </span>
       </button>
 
@@ -52,18 +67,15 @@ export default function WordCard({ word, onDelete, deleting }: Props) {
             borderTop: '1px solid #e5e7eb',
             paddingTop: 12,
             display: 'grid',
-            gap: 10,
+            gap: 12,
           }}
         >
-          {word.synonyms.length > 0 && (
-            <div>
-              <div className="label">동의어</div>
-              <div>{word.synonyms.map((s) => s.synonym).join(', ')}</div>
-            </div>
-          )}
+          {word.senses.map((sense, i) => (
+            <SenseDetail key={sense.id} sense={sense} index={i} total={senseCount} />
+          ))}
 
           {word.derived_words.length > 0 && (
-            <div>
+            <div style={{ borderTop: '1px dashed #e5e7eb', paddingTop: 12 }}>
               <div className="label">파생어</div>
               <ul style={{ paddingLeft: 18 }}>
                 {word.derived_words.map((d) => (
@@ -72,33 +84,6 @@ export default function WordCard({ word, onDelete, deleting }: Props) {
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
-
-          {word.examples.length > 0 && (
-            <div>
-              <div className="label">예문</div>
-              <ul style={{ paddingLeft: 18 }}>
-                {word.examples.map((ex) => (
-                  <li key={ex.id}>
-                    {ex.sentence}
-                    {/* A zero-length span means the headword was not found, so
-                        this sentence cannot become a fill-in-the-blank question. */}
-                    {ex.match_end <= ex.match_start && (
-                      <span style={{ color: '#b45309', fontSize: '0.8rem', marginLeft: 6 }}>
-                        (표제어 자동 인식 실패 · 빈칸 문제 제외)
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {word.test_point && (
-            <div>
-              <div className="label">출제포인트</div>
-              <div>{word.test_point}</div>
             </div>
           )}
 

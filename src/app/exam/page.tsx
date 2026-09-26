@@ -7,6 +7,8 @@ import ExamQuestion from '@/components/ExamQuestion';
 interface AnswerRecord {
   questionId: string;
   wordId: string;
+  /** Stars are rated per meaning, so the answer has to say which one. */
+  senseId: string;
   isCorrect: boolean;
   userAnswer?: string;
 }
@@ -88,6 +90,7 @@ export default function ExamPage() {
       {
         questionId: q.questionId,
         wordId: q.wordId,
+        senseId: q.senseId,
         isCorrect: result.isCorrect,
         userAnswer: result.userAnswer,
       },
@@ -121,7 +124,7 @@ export default function ExamPage() {
           {answers.length}문제 중 {correctCount}개 정답 ({percent}%)
         </p>
         <p style={{ color: '#6b7280', fontSize: '0.9rem' }}>
-          결과를 반영해 각 단어의 별점이 갱신되었습니다.
+          결과를 반영해 각 뜻의 별점이 갱신되었습니다.
         </p>
         <button className="btn" style={{ marginTop: '1rem' }} onClick={startExam}>
           다시 시험 보기

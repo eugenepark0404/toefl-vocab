@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, DuplicateHeadwordError } from '@/lib/db';
-import { buildWordRecord, planQuestions } from '@/lib/wordService';
+import { buildWordRecord } from '@/lib/wordService';
 import { SEED_WORDS } from '@/lib/seedWords';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,7 @@ export async function POST() {
     for (const input of SEED_WORDS) {
       const record = buildWordRecord(input);
       try {
-        await db.createWord(record, planQuestions(record));
+        await db.createWord(record);
         added++;
       } catch (err) {
         if (err instanceof DuplicateHeadwordError) {

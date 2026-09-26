@@ -17,21 +17,28 @@ specific and more recent decision.
 
 ## 1. Registering a word
 
-One screen, saved as a single card:
+One screen, saved as a single card. A headword carries **one or more meanings**,
+and synonyms and examples belong to a meaning, not to the word: `account for`
+means 설명하다, 차지하다 and 원인이 되다, each with its own synonyms and its own
+sentences.
 
-- **Headword** (English, required)
-- **Synonyms** (any number, added and removed with a button)
-- **Meaning** (Korean, required)
+- **Headword** (English, required; may be several words, e.g. `account for`)
+- **Meanings** (at least one, added and removed with a button). For each:
+  - **Meaning** (Korean, required)
+  - **Synonyms** for that meaning (any number)
+  - **Examples** for that meaning (any number)
+  - **Exam note** for that meaning (optional)
 - **Derived words**: part of speech from a dropdown (n / v / adj / adv / prep /
-  conj / pron / interj) plus the word
-- **Example sentences**: any number. The app locates the headword — or an
-  inflected form of it — in each sentence and stores its position, which is what
-  later makes a fill-in-the-blank question possible.
-- **Exam note**: only filled in when the vocabulary book gives one. Left blank,
-  that field alone is left empty; the word itself registers normally.
+  conj / pron / interj) plus the word. These belong to the headword as a whole,
+  not to one meaning.
 
-Saving also generates up to three exam questions, skipping any type it has no
-material for:
+The app locates the headword — or an inflected form of it — in each example and
+stores its position, which is what later makes a fill-in-the-blank question
+possible. An exam note left blank leaves that field alone empty; the meaning and
+the word still register normally.
+
+Saving generates up to three exam questions **per meaning**, skipping any type
+that meaning has no material for:
 
 1. Headword → write the Korean meaning (`meaning_write`) — always generated
 2. Headword → choose the synonym (`synonym_choice`) — needs at least one synonym
@@ -43,7 +50,9 @@ material for:
 - A card shows **headword, meaning and star rating** only.
 - Tapping it expands the card to show synonyms, derived words, examples and the
   exam note.
-- **The star rating is never set by hand.** The system recalculates it from exam
+- Several meanings are listed together, numbered, with a "뜻 N" badge.
+- **The star rating is never set by hand.** It is per meaning, and the badge on
+  a word shows its least-known meaning. The system recalculates from exam
   results:
   - ★☆☆ memorised
   - ★★☆ recognised, but not reliably
@@ -63,8 +72,16 @@ material for:
 
 - **45 questions a day**, shuffled from the questions generated at registration.
 - All three question types are mixed.
+- **Questions are drawn per meaning**, weighted by that meaning's stars, so a
+  word with three meanings has three things competing for slots.
 - **A word must not come up too often or twice in a row.** A cooldown blocks
-  immediate repeats, and no word may appear more than three times in a sitting.
+  immediate repeats, and no *headword* may appear more than three times in a
+  sitting — counted by headword so a word with many meanings cannot crowd out
+  the rest.
+- **A question about a word with several meanings must say which one it means.**
+  Writing the meaning shows an example as context; choosing a synonym names the
+  Korean meaning. Distractors never include a synonym of the same word's other
+  meanings. Revealing an answer lists the word's other meanings.
   Below 15 registered words the exam is shorter than 45 questions rather than
   looping over the same handful.
 - **Fill-in-the-blank gives a hint.** The opening letter (two from eight
@@ -78,22 +95,28 @@ material for:
 
 ### The star algorithm
 
-Each word carries up to three questions. After every sitting, that word's rating
-is recalculated (`src/lib/difficulty.ts`):
+Each meaning carries up to three questions. After every sitting, that
+**meaning's** rating is recalculated from its own history
+(`src/lib/difficulty.ts`):
 
 1. No exam history → **3**
 2. The last 5 attempts, all correct → **1**
 3. At least 3 correct out of the last 5 → **2**
 4. Otherwise (0–2 correct) → **3**
 
-Fewer stars means the word is better known. A word with fewer than five attempts
-cannot reach one star: while the evidence is thin the rating stays conservative
-and bottoms out at two.
+Fewer stars means the meaning is better known. A meaning with fewer than five
+attempts cannot reach one star: while the evidence is thin the rating stays
+conservative and bottoms out at two.
+
+Rating per meaning is the point. Answering "account for = 설명하다" correctly five
+times drives that meaning to one star and leaves 차지하다 and 원인이 되다 at three,
+so the exam keeps asking about the two that are still unlearned.
 
 ## 5. Data model
 
-`words` 1—N `synonyms` / `derived_words` / `examples` / `exam_questions`
-`exam_questions` 1—N `exam_attempts` (the evidence the star rating is built from)
+`words` 1—N `senses` 1—N `synonyms` / `examples` / `exam_questions`
+`words` 1—N `derived_words`
+`exam_attempts` carries `sense_id`, which is what the star rating is built from
 `exam_sessions` 1—N `exam_attempts` (one sitting)
 `today_word_log` — which words have already been shown today
 

@@ -10,20 +10,28 @@ end.
       file by default, Supabase when configured. Route handlers only call
       `getDb()`.
 - [x] Registration, with automatic question generation and headword location in
-      example sentences.
+      example sentences. Multi-word headwords (`account for`) inflect on the
+      first word.
+- [x] Several meanings per headword, each with its own synonyms, examples, exam
+      note and star rating. Exam questions name the meaning they are asking
+      about, and distractors exclude the word's other meanings.
 - [x] Word list: search across headword, meaning and synonyms; star filter;
       delete with confirmation.
 - [x] Today's words: flip cards, 30 a day, already-seen words skipped for the
       rest of the day.
 - [x] Exam: star-weighted drawing, cooldown, a cap of three appearances per
       word, all three question types, self-marking, automatic submission.
-- [x] Star recalculation after every sitting.
+- [x] Star recalculation after every sitting, per meaning.
 - [x] Starter vocabulary of 20 words, loaded on request.
 - [x] Duplicate headwords rejected with a readable message (409) instead of a
       raw database error.
 - [x] Mobile viewport and layout.
 - [x] `npm run migrate`, so setting up the database does not depend on finding
       the SQL editor in a dashboard that keeps changing.
+- [x] Sense migration verified against a real Postgres engine, both on a fresh
+      database and on one holding pre-senses rows: meanings, exam notes, star
+      ratings, synonyms, examples, questions and attempt history all carry over
+      with no orphans.
 - [x] Schema verified against a real Postgres engine: migrations apply, are
       idempotent, and the constraints the app relies on (case-insensitive
       unique headword, one log row per word per day, the question-type enum,

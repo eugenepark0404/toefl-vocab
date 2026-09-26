@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, DuplicateHeadwordError } from '@/lib/db';
-import { buildWordRecord, planQuestions, unmatchedExampleCount } from '@/lib/wordService';
+import { buildWordRecord, unmatchedExampleCount } from '@/lib/wordService';
 import type { WordFormInput } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -21,15 +21,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: '요청 형식이 올바르지 않습니다.' }, { status: 400 });
   }
 
-  if (!body.headword?.trim() || !body.meaning_ko?.trim()) {
-    return NextResponse.json({ error: '표제어와 뜻은 필수입니다.' }, { status: 400 });
+  if (!body.headword?.trim()) {
+    return NextResponse.json({ error: '표제어는 필수입니다.' }, { status: 400 });
   }
 
   const record = buildWordRecord(body);
-  const questions = planQuestions(record);
+  if (record.senses.length === 0) {
+    return NextResponse.json({ error: '뜻을 최소 한 개는 입력해주세요.' }, { status: 400 });
+  }
 
   try {
-    const word = await getDb().createWord(record, questions);
+    const word = await getDb().createWord(record);
     return NextResponse.json(
       {
         word,

@@ -6,8 +6,10 @@ English headwords against Korean meanings.
 
 It does three things:
 
-- **Register words** — headword, synonyms, derived words, example sentences and
-  an optional exam note. Exam questions are generated automatically as you save.
+- **Register words** — a headword with one or more meanings. Each meaning
+  carries its own synonyms, examples and exam note, because "account for" means
+  설명하다, 차지하다 and 원인이 되다, and those are three different things to learn.
+  Exam questions are generated automatically as you save.
 - **Today's words** — up to 30 flip cards a day, drawn from the words you
   currently know least well. Refreshing replays the same set; moving on to the
   next 30 is an explicit button.
@@ -113,10 +115,36 @@ in development — shows the same cards rather than consuming them. Asking for
 more is a separate action, and replay returns only the current batch, so a
 refresh during round two does not silently reopen round one.
 
+### Senses
+
+A sense — one meaning of one headword — is the unit this app studies, rates and
+examines. Rating the headword as a whole would let a meaning you know hide one
+you do not: score well on "account for = 설명하다" and the word looks learned,
+while "= 차지하다" is still a blank.
+
+So each sense gets its own star rating and competes for exam slots on its own.
+A word's badge in the list shows its **least**-known sense, since a word is only
+learned once every meaning of it is. Derived forms stay attached to the
+headword, not to a sense.
+
+A word with several meanings also changes what a question has to say. "What
+does account for mean?" has three right answers, so:
+
+- **Write the meaning** shows an example of that sense as context, the way the
+  word is met in reading. With no example available it names the sense by
+  number instead.
+- **Choose the synonym** names the Korean meaning in the prompt. Single-sense
+  words never see this, so nothing gets easier than it was.
+- Distractors never include a synonym of the same word's *other* senses.
+  Offering "supporter" as a wrong answer for advocate-the-verb would be
+  indefensible — it really is a synonym of advocate.
+- Revealing an answer also lists the word's other meanings, which is the
+  natural moment to be reminded of them.
+
 ### Difficulty rating (stars)
 
 Stars run backwards from the usual convention — **more stars means you know the
-word less well**, and the goal is to drive everything down to one star.
+sense less well**, and the goal is to drive everything down to one star.
 
 | Stars | Meaning |
 | --- | --- |
@@ -124,24 +152,26 @@ word less well**, and the goal is to drive everything down to one star.
 | ★★☆ | Recognised, but not reliably |
 | ★☆☆ | Memorised |
 
-You never set this by hand. After every exam it is recalculated from that word's
-history (`src/lib/difficulty.ts`):
+You never set this by hand. After every exam it is recalculated from that
+sense's own history (`src/lib/difficulty.ts`):
 
 1. No exam history → **3** (new word)
 2. Last 5 attempts, all correct → **1**
 3. At least 3 correct out of the last 5 → **2**
 4. Otherwise → **3**
 
-A word with fewer than five attempts cannot reach one star. There is not yet
+A sense with fewer than five attempts cannot reach one star. There is not yet
 enough evidence that it is memorised, so the rating stays conservative.
 
 ### Exam generation
 
-Words are drawn with their star count as the weight, so a 3-star word is three
-times as likely to appear as a 1-star one. Two limits keep one word from
-dominating a sitting: a cooldown that blocks immediate repeats, and a hard cap
-of three appearances per word. With fewer than 15 words the exam is simply
-shorter than 45 questions rather than looping over the same handful.
+Senses are drawn with their star count as the weight, so a 3-star sense is
+three times as likely to appear as a 1-star one. Two limits keep one entry from
+dominating a sitting: a cooldown that blocks immediate repeats, and a cap of
+three appearances per **headword** — counting by headword rather than by sense
+is what stops a word with many meanings from crowding out everything else. With
+a small vocabulary the exam is simply shorter than 45 questions rather than
+looping over the same handful.
 
 Three question types are mixed:
 
@@ -168,7 +198,9 @@ When you save an example sentence, the app locates the headword in it and stores
 the character span, which is what makes fill-in-the-blank questions possible.
 Regular inflections are handled — plurals, third person singular, `-ing`, `-ed`,
 comparatives — so *"Smartphones have become ubiquitous"* and *"Interest
-diminished over time"* both work.
+diminished over time"* both work. Multi-word headwords work too, with the
+inflection on the first word: `account for` matches *"accounts for"* and
+*"accounted for"*.
 
 Irregular forms are not (`undergo` → `underwent`). When the match fails the
 sentence is still saved and still shows on the word card; it just never becomes
@@ -197,12 +229,13 @@ src/
     WordForm.tsx                  Registration form
     WordList.tsx                  Search, filter, delete
     WordCard.tsx                  Collapsed / expanded word card
+    SenseDetail.tsx               One meaning, shared by the list and the card
     FlashCard.tsx                 Flip card
     ExamQuestion.tsx              Per-type question rendering
     SeedButton.tsx                Starter vocabulary loader
   lib/
     db/                           Storage interface and the two backends
-    types.ts                      Shared types
+    types.ts                      Shared types, incl. Sense
     wordService.ts                Input to storable record; question planning
     wordMatcher.ts                Headword location in example sentences
     difficulty.ts                 Star calculation

@@ -6,6 +6,10 @@
  * -ing, -ed, and comparatives. Irregular forms (go/went, be/was) are not
  * handled and will simply fail to match.
  *
+ * Multi-word headwords work too, because much of what gets studied is phrasal:
+ * "account for" has to match "accounted for" and "accounts for". Only the
+ * first word inflects, since that is where English carries the tense.
+ *
  * A failed match is not an error. The sentence is still stored and shown on the
  * word card; it just does not become a fill-in-the-blank question, because
  * blanking a span that was never found would show the student the answer.
@@ -58,17 +62,27 @@ function escapeRegExp(s: string): string {
 }
 
 export function findHeadwordInSentence(headword: string, sentence: string): MatchResult | null {
-  // Longest form first, so "studies" is preferred over a shorter form that
-  // happens to also appear.
-  const candidates = generateInflectedForms(headword).sort((a, b) => b.length - a.length);
+  const words = headword.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
 
-  for (const form of candidates) {
-    const pattern = new RegExp(`\\b${escapeRegExp(form)}\\b`, 'i');
+  const [first, ...rest] = words;
+  // Only the first word inflects: "accounted for", never "account fored".
+  // Longest form first, so "accounted" wins over a shorter form that also
+  // happens to appear.
+  const firstForms = generateInflectedForms(first).sort((a, b) => b.length - a.length);
+  // \s+ between the words rather than a literal space, so a line break or a
+  // double space in the pasted sentence still matches.
+  const tail = rest.map((w) => escapeRegExp(w)).join('\\s+');
+
+  for (const form of firstForms) {
+    const body = rest.length > 0 ? `${escapeRegExp(form)}\\s+${tail}` : escapeRegExp(form);
+    const pattern = new RegExp(`\\b${body}\\b`, 'i');
     const match = pattern.exec(sentence);
     if (match && match.index !== undefined) {
       const start = match.index;
       const end = start + match[0].length;
-      // Slice from the sentence, not the pattern, to keep the original casing.
+      // Slice from the sentence, not the pattern, to keep the original casing
+      // and the exact spacing between the words.
       return { matchedSurfaceForm: sentence.slice(start, end), start, end };
     }
   }

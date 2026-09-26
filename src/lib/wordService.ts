@@ -1,10 +1,11 @@
 import { findHeadwordInSentence } from '@/lib/wordMatcher';
-import type { NewWordRecord, PlannedQuestion } from '@/lib/db/types';
-import type { WordFormInput } from '@/lib/types';
+import type { NewSenseRecord, NewWordRecord, PlannedQuestion } from '@/lib/db/types';
+import type { SenseFormInput, WordFormInput } from '@/lib/types';
 
 /**
  * Turn raw form input into a storable record: trim everything, drop empty
- * rows, and locate the headword inside each example sentence.
+ * rows, locate the headword inside each example, and work out which exam
+ * questions each sense can support.
  *
  * This runs before either storage backend is touched, so a word registered
  * locally and the same word registered against Supabase produce identical
@@ -13,7 +14,22 @@ import type { WordFormInput } from '@/lib/types';
 export function buildWordRecord(input: WordFormInput): NewWordRecord {
   const headword = input.headword.trim();
 
-  const examples = (input.examples ?? [])
+  // A sense with no meaning is an empty row the user never filled in.
+  const senses = (input.senses ?? [])
+    .filter((s) => s.meaning_ko?.trim())
+    .map((sense) => buildSenseRecord(headword, sense));
+
+  return {
+    headword,
+    derived_words: (input.derived_words ?? [])
+      .filter((d) => d.word?.trim())
+      .map((d) => ({ pos: d.pos, derived_word: d.word.trim() })),
+    senses,
+  };
+}
+
+function buildSenseRecord(headword: string, sense: SenseFormInput): NewSenseRecord {
+  const examples = (sense.examples ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
     .map((sentence) => {
@@ -29,21 +45,20 @@ export function buildWordRecord(input: WordFormInput): NewWordRecord {
       };
     });
 
-  return {
-    headword,
-    meaning_ko: input.meaning_ko.trim(),
-    // An empty test point clears the field only; the word still registers.
-    test_point: input.test_point?.trim() ? input.test_point.trim() : null,
-    synonyms: (input.synonyms ?? []).map((s) => s.trim()).filter(Boolean),
-    derived_words: (input.derived_words ?? [])
-      .filter((d) => d.word?.trim())
-      .map((d) => ({ pos: d.pos, derived_word: d.word.trim() })),
+  const record: NewSenseRecord = {
+    meaning_ko: sense.meaning_ko.trim(),
+    // An empty exam note clears the field only; the sense still registers.
+    test_point: sense.test_point?.trim() ? sense.test_point.trim() : null,
+    synonyms: (sense.synonyms ?? []).map((s) => s.trim()).filter(Boolean),
     examples,
+    questions: [],
   };
+  record.questions = planQuestions(record);
+  return record;
 }
 
 /**
- * Decide which of the three question types this word can support.
+ * Decide which of the three question types this sense can support.
  *
  * `meaning_write` always works. The other two need material:
  *   - `synonym_choice` needs at least one synonym.
@@ -51,16 +66,14 @@ export function buildWordRecord(input: WordFormInput): NewWordRecord {
  *     Without a real span, blanking would return the sentence unchanged and
  *     hand the student the answer, so no question is created at all.
  */
-export function planQuestions(record: NewWordRecord): PlannedQuestion[] {
-  const planned: PlannedQuestion[] = [
-    { question_type: 'meaning_write', example_index: null },
-  ];
+export function planQuestions(sense: NewSenseRecord): PlannedQuestion[] {
+  const planned: PlannedQuestion[] = [{ question_type: 'meaning_write', example_index: null }];
 
-  if (record.synonyms.length > 0) {
+  if (sense.synonyms.length > 0) {
     planned.push({ question_type: 'synonym_choice', example_index: null });
   }
 
-  const blankableIndex = record.examples.findIndex((e) => e.match_end > e.match_start);
+  const blankableIndex = sense.examples.findIndex((e) => e.match_end > e.match_start);
   if (blankableIndex >= 0) {
     planned.push({ question_type: 'blank_fill', example_index: blankableIndex });
   }
@@ -68,7 +81,10 @@ export function planQuestions(record: NewWordRecord): PlannedQuestion[] {
   return planned;
 }
 
-/** Count of examples whose headword could not be located automatically. */
+/** Examples, across all senses, whose headword could not be located. */
 export function unmatchedExampleCount(record: NewWordRecord): number {
-  return record.examples.filter((e) => e.match_end <= e.match_start).length;
+  return record.senses.reduce(
+    (total, sense) => total + sense.examples.filter((e) => e.match_end <= e.match_start).length,
+    0
+  );
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Word } from '@/lib/types';
+import { worstStars, type Word } from '@/lib/types';
 import WordCard from '@/components/WordCard';
 import SeedButton from '@/components/SeedButton';
 
@@ -29,14 +29,18 @@ export default function WordList({ words }: { words: Word[] }) {
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return words.filter((w) => {
-      if (starFilter !== 'all' && w.difficulty_stars !== starFilter) return false;
+      // Filter on the least-known sense, which is what the badge shows.
+      if (starFilter !== 'all' && worstStars(w) !== starFilter) return false;
       if (!q) return true;
       // Search the headword, the Korean meaning and the synonyms, so you can
       // find a card from whichever side you happen to remember.
       return (
         w.headword.toLowerCase().includes(q) ||
-        w.meaning_ko.toLowerCase().includes(q) ||
-        w.synonyms.some((s) => s.synonym.toLowerCase().includes(q))
+        w.senses.some(
+          (sense) =>
+            sense.meaning_ko.toLowerCase().includes(q) ||
+            sense.synonyms.some((s) => s.synonym.toLowerCase().includes(q))
+        )
       );
     });
   }, [words, query, starFilter]);

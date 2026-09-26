@@ -1,13 +1,12 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Word } from '@/lib/types';
+import type { Sense, Word } from '@/lib/types';
 import {
   DuplicateHeadwordError,
   type AttemptInput,
-  type TodayLogEntry,
   type NewWordRecord,
-  type PlannedQuestion,
+  type SenseForExam,
+  type TodayLogEntry,
   type WordRepository,
-  type WordWithQuestions,
 } from '@/lib/db/types';
 
 /**
@@ -41,8 +40,7 @@ function createServerSupabaseClient(): SupabaseClient {
 /** Postgres unique-violation, raised here by the unique index on lower(headword). */
 const UNIQUE_VIOLATION = '23505';
 
-const WORD_SELECT = '*, synonyms(*), derived_words(*), examples(*)';
-const WORD_SELECT_WITH_QUESTIONS = '*, synonyms(*), derived_words(*), examples(*), exam_questions(*)';
+const WORD_SELECT = '*, derived_words(*), senses(*, synonyms(*), examples(*))';
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
 
@@ -50,12 +48,24 @@ const byPosition = (a: { position: number }, b: { position: number }) => a.posit
  * Postgres returns related rows in no guaranteed order, so sort them here.
  * Position order is what the user typed, and the UI depends on it.
  */
-function normalise<T extends { synonyms?: any[]; derived_words?: any[]; examples?: any[] }>(row: T): T {
+function normalise(row: any): Word {
   return {
-    ...row,
-    synonyms: [...(row.synonyms ?? [])].sort(byPosition),
+    id: row.id,
+    headword: row.headword,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
     derived_words: [...(row.derived_words ?? [])].sort(byPosition),
-    examples: [...(row.examples ?? [])].sort(byPosition),
+    senses: [...(row.senses ?? [])].sort(byPosition).map(
+      (s: any): Sense => ({
+        id: s.id,
+        meaning_ko: s.meaning_ko,
+        test_point: s.test_point,
+        difficulty_stars: s.difficulty_stars,
+        position: s.position,
+        synonyms: [...(s.synonyms ?? [])].sort(byPosition),
+        examples: [...(s.examples ?? [])].sort(byPosition),
+      })
+    ),
   };
 }
 
@@ -73,14 +83,14 @@ export class SupabaseRepository implements WordRepository {
       .select(WORD_SELECT)
       .order('created_at', { ascending: false });
     if (error) fail(error.message, 'Failed to load words.');
-    return (data ?? []).map(normalise) as Word[];
+    return (data ?? []).map(normalise);
   }
 
   async getWord(id: string): Promise<Word | null> {
     const supabase = createServerSupabaseClient();
     const { data, error } = await supabase.from('words').select(WORD_SELECT).eq('id', id).maybeSingle();
     if (error) fail(error.message, 'Failed to load the word.');
-    return data ? (normalise(data) as Word) : null;
+    return data ? normalise(data) : null;
   }
 
   async findWordByHeadword(headword: string): Promise<Word | null> {
@@ -93,21 +103,15 @@ export class SupabaseRepository implements WordRepository {
       .ilike('headword', headword.trim())
       .maybeSingle();
     if (error) fail(error.message, 'Failed to look up the word.');
-    return data ? (normalise(data) as Word) : null;
+    return data ? normalise(data) : null;
   }
 
-  async createWord(record: NewWordRecord, questions: PlannedQuestion[]): Promise<Word> {
+  async createWord(record: NewWordRecord): Promise<Word> {
     const supabase = createServerSupabaseClient();
 
     const { data: word, error: wordError } = await supabase
       .from('words')
-      .insert({
-        headword: record.headword,
-        meaning_ko: record.meaning_ko,
-        test_point: record.test_point,
-        // New words start at 3 stars: no exam history yet, so treat as unfamiliar.
-        difficulty_stars: 3,
-      })
+      .insert({ headword: record.headword })
       .select()
       .single();
 
@@ -117,13 +121,6 @@ export class SupabaseRepository implements WordRepository {
     // Postgres has no multi-statement transaction over the REST API, so if a
     // child insert fails the word row is removed to avoid a half-written word.
     try {
-      if (record.synonyms.length > 0) {
-        const { error } = await supabase.from('synonyms').insert(
-          record.synonyms.map((synonym, position) => ({ word_id: word.id, synonym, position }))
-        );
-        if (error) fail(error.message, 'Failed to save synonyms.');
-      }
-
       if (record.derived_words.length > 0) {
         const { error } = await supabase.from('derived_words').insert(
           record.derived_words.map((d, position) => ({ word_id: word.id, ...d, position }))
@@ -131,24 +128,60 @@ export class SupabaseRepository implements WordRepository {
         if (error) fail(error.message, 'Failed to save derived words.');
       }
 
-      let exampleIds: string[] = [];
-      if (record.examples.length > 0) {
-        const { data: rows, error } = await supabase
-          .from('examples')
-          .insert(record.examples.map((e, position) => ({ word_id: word.id, position, ...e })))
-          .select('id, position');
-        if (error) fail(error.message, 'Failed to save examples.');
-        exampleIds = [...(rows ?? [])].sort(byPosition).map((r) => r.id as string);
-      }
+      for (const [sensePosition, senseRecord] of record.senses.entries()) {
+        const { data: sense, error: senseError } = await supabase
+          .from('senses')
+          .insert({
+            word_id: word.id,
+            meaning_ko: senseRecord.meaning_ko,
+            test_point: senseRecord.test_point,
+            // A new sense starts at 3 stars: no exam history yet.
+            difficulty_stars: 3,
+            position: sensePosition,
+          })
+          .select()
+          .single();
+        if (senseError || !sense) fail(senseError?.message, 'Failed to save a meaning.');
 
-      const { error: questionError } = await supabase.from('exam_questions').insert(
-        questions.map((q) => ({
-          word_id: word.id,
-          question_type: q.question_type,
-          example_id: q.example_index === null ? null : exampleIds[q.example_index] ?? null,
-        }))
-      );
-      if (questionError) fail(questionError.message, 'Failed to create exam questions.');
+        if (senseRecord.synonyms.length > 0) {
+          const { error } = await supabase.from('synonyms').insert(
+            senseRecord.synonyms.map((synonym, position) => ({
+              word_id: word.id,
+              sense_id: sense.id,
+              synonym,
+              position,
+            }))
+          );
+          if (error) fail(error.message, 'Failed to save synonyms.');
+        }
+
+        let exampleIds: string[] = [];
+        if (senseRecord.examples.length > 0) {
+          const { data: rows, error } = await supabase
+            .from('examples')
+            .insert(
+              senseRecord.examples.map((e, position) => ({
+                word_id: word.id,
+                sense_id: sense.id,
+                position,
+                ...e,
+              }))
+            )
+            .select('id, position');
+          if (error) fail(error.message, 'Failed to save examples.');
+          exampleIds = [...(rows ?? [])].sort(byPosition).map((r) => r.id as string);
+        }
+
+        const { error: questionError } = await supabase.from('exam_questions').insert(
+          senseRecord.questions.map((q) => ({
+            word_id: word.id,
+            sense_id: sense.id,
+            question_type: q.question_type,
+            example_id: q.example_index === null ? null : exampleIds[q.example_index] ?? null,
+          }))
+        );
+        if (questionError) fail(questionError.message, 'Failed to create exam questions.');
+      }
     } catch (err) {
       await supabase.from('words').delete().eq('id', word.id);
       throw err;
@@ -167,13 +200,15 @@ export class SupabaseRepository implements WordRepository {
 
   async listWordsByStars(stars: number[]): Promise<Word[]> {
     const supabase = createServerSupabaseClient();
-    const { data, error } = await supabase
-      .from('words')
-      .select(WORD_SELECT)
-      .in('difficulty_stars', stars)
-      .order('created_at', { ascending: false });
-    if (error) fail(error.message, 'Failed to load words.');
-    return (data ?? []).map(normalise) as Word[];
+    // A word is due for review if ANY of its senses is; the card shows them all.
+    const { data: due, error: dueError } = await supabase
+      .from('senses')
+      .select('word_id')
+      .in('difficulty_stars', stars);
+    if (dueError) fail(dueError.message, 'Failed to load review candidates.');
+
+    const ids = Array.from(new Set((due ?? []).map((r) => r.word_id as string)));
+    return this.listWordsByIds(ids);
   }
 
   async listWordsByIds(ids: string[]): Promise<Word[]> {
@@ -185,16 +220,53 @@ export class SupabaseRepository implements WordRepository {
       .in('id', ids)
       .order('created_at', { ascending: false });
     if (error) fail(error.message, 'Failed to load words.');
-    return (data ?? []).map(normalise) as Word[];
+    return (data ?? []).map(normalise);
   }
 
-  async listWordsWithQuestions(): Promise<WordWithQuestions[]> {
+  async listSensesForExam(): Promise<SenseForExam[]> {
     const supabase = createServerSupabaseClient();
-    const { data, error } = await supabase.from('words').select(WORD_SELECT_WITH_QUESTIONS);
+    const { data, error } = await supabase
+      .from('words')
+      .select('*, derived_words(*), senses(*, synonyms(*), examples(*), exam_questions(*))');
     if (error) fail(error.message, 'Failed to load words.');
-    return (data ?? [])
-      .map(normalise)
-      .filter((w: any) => (w.exam_questions ?? []).length > 0) as WordWithQuestions[];
+
+    const out: SenseForExam[] = [];
+    for (const row of data ?? []) {
+      const word = normalise(row);
+      const questionsBySense = new Map<string, any[]>();
+      for (const s of (row as any).senses ?? []) {
+        questionsBySense.set(s.id, s.exam_questions ?? []);
+      }
+
+      word.senses.forEach((sense, index) => {
+        const questions = (questionsBySense.get(sense.id) ?? []).map((q: any) => ({
+          id: q.id,
+          word_id: q.word_id,
+          sense_id: q.sense_id,
+          question_type: q.question_type,
+          example_id: q.example_id,
+        }));
+        if (questions.length === 0) return;
+
+        out.push({
+          senseId: sense.id,
+          wordId: word.id,
+          headword: word.headword,
+          meaning_ko: sense.meaning_ko,
+          difficulty_stars: sense.difficulty_stars,
+          senseIndex: index,
+          senseTotal: word.senses.length,
+          otherMeanings: word.senses.filter((_, i) => i !== index).map((s) => s.meaning_ko),
+          synonyms: sense.synonyms.map((s) => s.synonym),
+          siblingSynonyms: word.senses
+            .filter((_, i) => i !== index)
+            .flatMap((s) => s.synonyms.map((x) => x.synonym)),
+          examples: sense.examples,
+          questions,
+        });
+      });
+    }
+    return out;
   }
 
   async getTodayLog(day: string): Promise<TodayLogEntry[]> {
@@ -245,6 +317,7 @@ export class SupabaseRepository implements WordRepository {
         session_id: sessionId,
         question_id: a.questionId,
         word_id: a.wordId,
+        sense_id: a.senseId,
         is_correct: a.isCorrect,
         user_answer: a.userAnswer ?? null,
         // Stagger by index so answers from one submission keep the order they
@@ -255,20 +328,20 @@ export class SupabaseRepository implements WordRepository {
     if (error) fail(error.message, 'Failed to record answers.');
   }
 
-  async getAttemptHistory(wordId: string): Promise<boolean[]> {
+  async getSenseAttemptHistory(senseId: string): Promise<boolean[]> {
     const supabase = createServerSupabaseClient();
     const { data, error } = await supabase
       .from('exam_attempts')
       .select('is_correct, answered_at')
-      .eq('word_id', wordId)
+      .eq('sense_id', senseId)
       .order('answered_at', { ascending: true });
     if (error) fail(error.message, 'Failed to load exam history.');
     return (data ?? []).map((r) => r.is_correct as boolean);
   }
 
-  async updateWordStars(wordId: string, stars: 1 | 2 | 3): Promise<void> {
+  async updateSenseStars(senseId: string, stars: 1 | 2 | 3): Promise<void> {
     const supabase = createServerSupabaseClient();
-    const { error } = await supabase.from('words').update({ difficulty_stars: stars }).eq('id', wordId);
+    const { error } = await supabase.from('senses').update({ difficulty_stars: stars }).eq('id', senseId);
     if (error) fail(error.message, 'Failed to update the difficulty rating.');
   }
 }
