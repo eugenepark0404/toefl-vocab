@@ -12,7 +12,7 @@ import type { SenseFormInput, WordFormInput } from '@/lib/types';
  * rows.
  */
 export function buildWordRecord(input: WordFormInput): NewWordRecord {
-  const headword = input.headword.trim();
+  const headword = normaliseHeadword(input.headword);
 
   // A sense with no meaning is an empty row the user never filled in.
   const senses = (input.senses ?? [])
@@ -26,6 +26,20 @@ export function buildWordRecord(input: WordFormInput): NewWordRecord {
       .map((d) => ({ pos: d.pos, derived_word: d.word.trim() })),
     senses,
   };
+}
+
+/**
+ * Collapse the whitespace in a headword.
+ *
+ * Trimming the ends is not enough once headwords can be phrases. "account for"
+ * typed or pasted with two spaces is the same entry as with one, but as raw
+ * text the two differ, so the duplicate check waved it through and the word
+ * was silently stored twice. Normalising here means everything downstream -
+ * the uniqueness check, the unique index in Postgres, the matcher - compares
+ * the same thing.
+ */
+export function normaliseHeadword(headword: string): string {
+  return headword.trim().replace(/\s+/g, ' ');
 }
 
 function buildSenseRecord(headword: string, sense: SenseFormInput): NewSenseRecord {
@@ -46,6 +60,9 @@ function buildSenseRecord(headword: string, sense: SenseFormInput): NewSenseReco
     });
 
   const record: NewSenseRecord = {
+    // Carried through so an edit updates the existing row instead of
+    // replacing it, which would reset the rating.
+    id: sense.id,
     meaning_ko: sense.meaning_ko.trim(),
     // An empty exam note clears the field only; the sense still registers.
     test_point: sense.test_point?.trim() ? sense.test_point.trim() : null,

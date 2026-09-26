@@ -34,6 +34,9 @@ export interface PlannedQuestion {
 }
 
 export interface NewSenseRecord {
+  /** On an update, the existing sense this replaces. Keeping the row is what
+   *  preserves its star rating and its attempt history across an edit. */
+  id?: string;
   meaning_ko: string;
   test_point: string | null;
   synonyms: string[];
@@ -89,6 +92,15 @@ export interface WordRepository {
   /** Case-insensitive, so `Exploit` collides with `exploit`. */
   findWordByHeadword(headword: string): Promise<Word | null>;
   createWord(record: NewWordRecord): Promise<Word>;
+  /**
+   * Replace a word's content in place.
+   *
+   * Senses carrying an `id` are updated and keep their rating and history;
+   * senses without one are created at 3 stars; senses no longer present are
+   * removed. Exam questions are reconciled rather than rebuilt, so answering
+   * history is not thrown away by an unrelated edit.
+   */
+  updateWord(id: string, record: NewWordRecord): Promise<Word>;
   deleteWord(id: string): Promise<void>;
 
   /** Words with at least one sense at the given star levels, for review. */

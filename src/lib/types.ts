@@ -121,6 +121,9 @@ export interface ExamQuestionPayload {
 }
 
 export interface SenseFormInput {
+  /** Set when editing: names the existing sense to update in place, so its
+   *  star rating and exam history survive the edit. Absent means "new". */
+  id?: string;
   meaning_ko: string;
   test_point?: string;
   synonyms: string[];

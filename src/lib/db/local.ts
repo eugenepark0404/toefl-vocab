@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Sense, Word } from '@/lib/types';
+import { normaliseHeadword } from '@/lib/wordService';
 import {
   DuplicateHeadwordError,
   type AttemptInput,
+  type NewSenseRecord,
   type NewWordRecord,
   type SenseForExam,
   type TodayLogEntry,
@@ -246,6 +248,64 @@ function assemble(db: Database, row: WordRow): Word {
   };
 }
 
+/**
+ * Write a sense's synonyms, examples and questions, reusing the question rows
+ * that are still valid.
+ *
+ * Questions are reconciled rather than rebuilt because `exam_attempts` hangs
+ * off `exam_questions`: dropping and recreating a question would take its
+ * answering history with it, and the star rating is derived from that history.
+ * Fixing a typo in an example should not quietly reset what the app knows
+ * about how well the meaning is known.
+ */
+function writeSenseChildren(db: Database, senseRow: SenseRow, record: NewSenseRecord, now: string) {
+  const wordId = senseRow.word_id;
+
+  // Synonyms and examples carry no history of their own, so replacing them
+  // wholesale is safe and much simpler than diffing.
+  db.synonyms = db.synonyms.filter((r) => r.sense_id !== senseRow.id);
+  record.synonyms.forEach((synonym, position) => {
+    db.synonyms.push({ id: randomUUID(), word_id: wordId, sense_id: senseRow.id, synonym, position });
+  });
+
+  db.examples = db.examples.filter((r) => r.sense_id !== senseRow.id);
+  const exampleIds = record.examples.map((e, position) => {
+    const id = randomUUID();
+    db.examples.push({ id, word_id: wordId, sense_id: senseRow.id, position, ...e });
+    return id;
+  });
+
+  const wanted = new Map(record.questions.map((q) => [q.question_type as string, q]));
+  const existing = db.exam_questions.filter((q) => q.sense_id === senseRow.id);
+
+  // Drop question types this sense can no longer support (its last synonym
+  // was removed, say). Their attempts go too, mirroring the cascade in Postgres.
+  for (const q of existing) {
+    if (!wanted.has(q.question_type)) {
+      db.exam_questions = db.exam_questions.filter((x) => x.id !== q.id);
+      db.exam_attempts = db.exam_attempts.filter((a) => a.question_id !== q.id);
+    }
+  }
+
+  for (const [type, plan] of wanted) {
+    const exampleId = plan.example_index === null ? null : exampleIds[plan.example_index] ?? null;
+    const kept = db.exam_questions.find((q) => q.sense_id === senseRow.id && q.question_type === type);
+    if (kept) {
+      // The old example row is gone; point the question at its replacement.
+      kept.example_id = exampleId;
+    } else {
+      db.exam_questions.push({
+        id: randomUUID(),
+        word_id: wordId,
+        sense_id: senseRow.id,
+        question_type: type,
+        example_id: exampleId,
+        created_at: now,
+      });
+    }
+  }
+}
+
 export class LocalRepository implements WordRepository {
   readonly backend = 'local' as const;
 
@@ -262,15 +322,15 @@ export class LocalRepository implements WordRepository {
 
   async findWordByHeadword(headword: string): Promise<Word | null> {
     const db = await readDb();
-    const target = headword.trim().toLowerCase();
-    const row = db.words.find((w) => w.headword.toLowerCase() === target);
+    const target = normaliseHeadword(headword).toLowerCase();
+    const row = db.words.find((w) => normaliseHeadword(w.headword).toLowerCase() === target);
     return row ? assemble(db, row) : null;
   }
 
   async createWord(record: NewWordRecord): Promise<Word> {
     return transaction((db) => {
-      const target = record.headword.toLowerCase();
-      if (db.words.some((w) => w.headword.toLowerCase() === target)) {
+      const target = normaliseHeadword(record.headword).toLowerCase();
+      if (db.words.some((w) => normaliseHeadword(w.headword).toLowerCase() === target)) {
         throw new DuplicateHeadwordError(record.headword);
       }
 
@@ -304,34 +364,86 @@ export class LocalRepository implements WordRepository {
           position: sensePosition,
         };
         db.senses.push(sense);
+        writeSenseChildren(db, sense, senseRecord, now);
+      });
 
-        senseRecord.synonyms.forEach((synonym, position) => {
-          db.synonyms.push({
-            id: randomUUID(),
-            word_id: word.id,
-            sense_id: sense.id,
-            synonym,
-            position,
-          });
-        });
+      return assemble(db, word);
+    });
+  }
 
-        const exampleIds = senseRecord.examples.map((e, position) => {
-          const id = randomUUID();
-          db.examples.push({ id, word_id: word.id, sense_id: sense.id, position, ...e });
-          return id;
-        });
+  async updateWord(id: string, record: NewWordRecord): Promise<Word> {
+    return transaction((db) => {
+      const word = db.words.find((w) => w.id === id);
+      if (!word) throw new Error('수정할 단어를 찾을 수 없습니다.');
 
-        senseRecord.questions.forEach((q) => {
-          db.exam_questions.push({
-            id: randomUUID(),
-            word_id: word.id,
-            sense_id: sense.id,
-            question_type: q.question_type,
-            example_id: q.example_index === null ? null : exampleIds[q.example_index] ?? null,
-            created_at: now,
-          });
+      const target = normaliseHeadword(record.headword).toLowerCase();
+      // The word keeps its own headword; only a clash with a DIFFERENT word counts.
+      if (
+        db.words.some(
+          (w) => w.id !== id && normaliseHeadword(w.headword).toLowerCase() === target
+        )
+      ) {
+        throw new DuplicateHeadwordError(record.headword);
+      }
+
+      const now = new Date().toISOString();
+      word.headword = record.headword;
+      word.updated_at = now;
+
+      // Derived forms have no history attached, so replace them outright.
+      db.derived_words = db.derived_words.filter((r) => r.word_id !== id);
+      record.derived_words.forEach((d, position) => {
+        db.derived_words.push({
+          id: randomUUID(),
+          word_id: id,
+          pos: d.pos,
+          derived_word: d.derived_word,
+          position,
         });
       });
+
+      const keptSenseIds = new Set<string>();
+
+      record.senses.forEach((senseRecord, position) => {
+        const existing = senseRecord.id
+          ? db.senses.find((s) => s.id === senseRecord.id && s.word_id === id)
+          : undefined;
+
+        if (existing) {
+          // Update in place: difficulty_stars is deliberately untouched, and
+          // the row keeps its id so exam_attempts still point at it.
+          existing.meaning_ko = senseRecord.meaning_ko;
+          existing.test_point = senseRecord.test_point;
+          existing.position = position;
+          keptSenseIds.add(existing.id);
+          writeSenseChildren(db, existing, senseRecord, now);
+        } else {
+          const sense: SenseRow = {
+            id: randomUUID(),
+            word_id: id,
+            meaning_ko: senseRecord.meaning_ko,
+            test_point: senseRecord.test_point,
+            difficulty_stars: 3,
+            position,
+          };
+          db.senses.push(sense);
+          keptSenseIds.add(sense.id);
+          writeSenseChildren(db, sense, senseRecord, now);
+        }
+      });
+
+      // Senses the user removed, with everything hanging off them.
+      const dropped = db.senses.filter((s) => s.word_id === id && !keptSenseIds.has(s.id));
+      for (const sense of dropped) {
+        const questionIds = new Set(
+          db.exam_questions.filter((q) => q.sense_id === sense.id).map((q) => q.id)
+        );
+        db.senses = db.senses.filter((s) => s.id !== sense.id);
+        db.synonyms = db.synonyms.filter((r) => r.sense_id !== sense.id);
+        db.examples = db.examples.filter((r) => r.sense_id !== sense.id);
+        db.exam_questions = db.exam_questions.filter((q) => q.sense_id !== sense.id);
+        db.exam_attempts = db.exam_attempts.filter((a) => !questionIds.has(a.question_id));
+      }
 
       return assemble(db, word);
     });

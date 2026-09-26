@@ -87,8 +87,15 @@ export default function WordCard({ word, onDelete, deleting }: Props) {
             </div>
           )}
 
-          {onDelete && (
-            <div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem', padding: '0.35rem 0.7rem', textDecoration: 'none' }}
+              href={`/words/${word.id}/edit`}
+            >
+              수정
+            </a>
+            {onDelete && (
               <button
                 className="btn btn-secondary"
                 style={{ color: '#dc2626', fontSize: '0.8rem', padding: '0.35rem 0.7rem' }}
@@ -97,8 +104,8 @@ export default function WordCard({ word, onDelete, deleting }: Props) {
               >
                 {deleting ? '삭제 중...' : '삭제'}
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>

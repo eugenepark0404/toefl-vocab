@@ -115,6 +115,25 @@ in development — shows the same cards rather than consuming them. Asking for
 more is a separate action, and replay returns only the current batch, so a
 refresh during round two does not silently reopen round one.
 
+### Editing
+
+A word can be edited from its card in the list. Meanings sent back with their
+id are updated in place, so **the star rating and the answering history
+survive**: fixing a typo in an example must not quietly reset what the app
+knows about how well a meaning is known. Meanings without an id are added at
+three stars, and meanings left out are removed along with their history.
+
+Exam questions are reconciled rather than rebuilt for the same reason.
+`exam_attempts` references `exam_questions` with `on delete cascade`, so
+dropping and recreating a question would take its history with it. A question
+is only deleted when the meaning can no longer support that type at all — when
+its last synonym is removed, say.
+
+Headwords are unique, case-insensitively and ignoring extra whitespace. A
+clash is refused rather than merged, and the registration form says so while
+the headword is being typed rather than after the whole form has been filled
+in. Renaming a word onto itself is naturally allowed.
+
 ### Senses
 
 A sense — one meaning of one headword — is the unit this app studies, rates and
@@ -216,11 +235,12 @@ src/
     page.tsx                      Home, with counts and the storage-mode notice
     words/page.tsx                Word list with search and star filter
     words/new/page.tsx            Registration form
+    words/[id]/edit/page.tsx      Edit an existing word
     today/page.tsx                Today's words (flip cards)
     exam/page.tsx                 Exam runner
     api/
       words/route.ts              List / create words
-      words/[id]/route.ts         Fetch / delete one word
+      words/[id]/route.ts         Fetch / update / delete one word
       today/route.ts              Today's 2-3 star words
       exam/generate/route.ts      Build a sitting
       exam/submit/route.ts        Record answers, recalculate stars

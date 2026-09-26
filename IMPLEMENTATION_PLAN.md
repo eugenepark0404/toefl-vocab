@@ -16,7 +16,11 @@ end.
       note and star rating. Exam questions name the meaning they are asking
       about, and distractors exclude the word's other meanings.
 - [x] Word list: search across headword, meaning and synonyms; star filter;
-      delete with confirmation.
+      edit and delete with confirmation.
+- [x] Editing a word: meanings update in place and keep their star rating and
+      answering history; meanings can be added and removed; the headword can
+      be renamed. Exam questions are reconciled, not rebuilt, so an unrelated
+      edit does not discard history.
 - [x] Today's words: flip cards, 30 a day, already-seen words skipped for the
       rest of the day.
 - [x] Exam: star-weighted drawing, cooldown, a cap of three appearances per
@@ -24,7 +28,8 @@ end.
 - [x] Star recalculation after every sitting, per meaning.
 - [x] Starter vocabulary of 20 words, loaded on request.
 - [x] Duplicate headwords rejected with a readable message (409) instead of a
-      raw database error.
+      raw database error, case-insensitively and ignoring extra whitespace,
+      and flagged in the form while the headword is typed.
 - [x] Mobile viewport and layout.
 - [x] `npm run migrate`, so setting up the database does not depend on finding
       the SQL editor in a dashboard that keeps changing.
@@ -64,10 +69,10 @@ end.
 
 ## Phase 3 — editing
 
-- [ ] `PATCH /api/words/[id]`. The complication is not the word row but its
-      children: changing the synonyms or examples means regenerating the
-      affected questions, and deleting an example has to delete any `blank_fill`
-      question pointing at it.
+Done. What is left here is narrower:
+
+- [ ] Reordering meanings by dragging, rather than delete-and-retype.
+- [ ] An undo for a removed meaning, which currently takes its history with it.
 
 ## Phase 4 — scale
 

@@ -45,11 +45,28 @@ that meaning has no material for:
 3. Fill in the blank (`blank_fill`) — needs an example sentence in which the
    headword was actually located
 
+## 1a. Editing a registered word
+
+- A word can be edited from its card. The form opens with everything already
+  filled in.
+- **Editing a meaning keeps its star rating and exam history.** Correcting a
+  typo must not reset what has been learned.
+- Meanings can be added (starting at 3 stars) and removed (taking their history
+  with them, after a confirmation).
+- The headword can be renamed, but not onto a headword that already exists.
+
+## 1b. Duplicate headwords
+
+The same headword cannot be registered twice. Comparison ignores case and
+collapses whitespace, so `account for` and `Account  For` are the same entry.
+The attempt is refused with a message naming the word, and the registration
+form flags it while the headword is being typed rather than only on save.
+
 ## 2. The word list
 
 - A card shows **headword, meaning and star rating** only.
 - Tapping it expands the card to show synonyms, derived words, examples and the
-  exam note.
+  exam note, with buttons to edit or delete the word.
 - Several meanings are listed together, numbered, with a "뜻 N" badge.
 - **The star rating is never set by hand.** It is per meaning, and the badge on
   a word shows its least-known meaning. The system recalculates from exam
