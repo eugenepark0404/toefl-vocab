@@ -102,6 +102,16 @@
 
   .hint { font-size: 0.8rem; color: var(--muted); margin: 4px 0 0; }
 
+  /* TOEFL Complete the Words 빈칸 */
+  .sentence { margin: 0 0 12px; line-height: 2.1; font-size: 1.05rem; }
+  .cw { white-space: nowrap; }
+  .cw-pre { font-weight: 600; }
+  .cw-in { border: 0; border-bottom: 2px solid #9ca3af; border-radius: 0; background: transparent; font: inherit; font-weight: 600; padding: 0 2px; text-align: left; color: var(--ink); letter-spacing: 0.08em; }
+  .cw-in:focus { outline: none; border-bottom-color: #2563eb; }
+  .cw-in::placeholder { color: #9ca3af; }
+  .md-list { margin: 6px 0 0; padding-left: 18px; font-size: 0.85rem; }
+  textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; }
+
   @media (max-width: 480px) {
     .nav { gap: 0.9rem; padding: 0.75rem 1rem; }
     .nav a { font-size: 0.9rem; }
@@ -114,6 +124,7 @@
 <body>
 <nav class="nav" id="nav">
   <a href="#/register" data-route="register">단어 등록</a>
+  <a href="#/import" data-route="import">md 등록</a>
   <a href="#/exam" data-route="exam">시험</a>
   <a href="#/words" data-route="words">등록된 단어</a>
   <a href="#/data" data-route="data">백업</a>
@@ -132,8 +143,8 @@
  * 데이터는 이 브라우저의 localStorage 한 곳에만 저장된다.
  *
  * 시험의 단위는 "항목(entry)"이다.
- *   - 표제어 항목: 뜻 하나당 하나. 한국어 뜻 문제 + (예문이 있으면) 빈칸 문제.
- *   - 유의어 항목: 유의어 하나당 하나. 한국어 뜻만 묻는다.
+ *   - 표제어 항목: 단어당 하나. 한국어 뜻 문제(뜻 개수만큼 빈칸) + (예문이 있으면) 예문 빈칸 문제.
+ *   - 유의어 항목: 유의어 하나당 하나. 그 유의어가 속한 뜻의 한국어만 묻는다.
  * 항목마다 별점과 시험 기록이 따로 있고, 출제 가중치는 별 개수 그대로다.
  * ===================================================================== */
 
@@ -160,7 +171,7 @@ const dayList = () => Array.from({ length: DAY_COUNT }, (_, i) => i + 1);
 let storageWorks = true;
 
 function emptyDb() {
-  return { version: 2, words: [], attempts: [], settings: { registerDay: null, listTab: 'all' } };
+  return { version: 3, words: [], attempts: [], settings: { registerDay: null, listTab: 'all' } };
 }
 
 function normaliseDb(p) {
@@ -168,6 +179,31 @@ function normaliseDb(p) {
   if (p && Array.isArray(p.words)) d.words = p.words;
   if (p && Array.isArray(p.attempts)) d.attempts = p.attempts;
   if (p && p.settings && typeof p.settings === 'object') Object.assign(d.settings, p.settings);
+  return migrateDb(d);
+}
+
+/**
+ * 이전 형식(뜻마다 별점이 있던 v2)을 현재 형식으로 올린다.
+ * 표제어 항목은 이제 단어당 하나라서, 별점은 가장 모르는 뜻을 따르고
+ * 뜻에 쌓여 있던 시험 기록은 그 단어의 기록으로 옮긴다.
+ */
+function migrateDb(d) {
+  const senseToWord = new Map();
+  for (const w of d.words) {
+    if (!Array.isArray(w.senses)) w.senses = [];
+    for (const s of w.senses) {
+      if (!Array.isArray(s.synonyms)) s.synonyms = [];
+      if (!Array.isArray(s.examples)) s.examples = [];
+      senseToWord.set(s.id, w.id);
+    }
+    if (typeof w.stars !== 'number') {
+      w.stars = w.senses.length ? w.senses.reduce((m, s) => Math.max(m, clampStar(s.stars)), 1) : 3;
+    }
+  }
+  for (const a of d.attempts) {
+    if (senseToWord.has(a.entryId)) a.entryId = senseToWord.get(a.entryId);
+  }
+  d.version = 3;
   return d;
 }
 
@@ -227,9 +263,8 @@ function historyOf(entryId) {
 
 /** 단어의 별점 = 표제어 항목과 유의어 항목 중 가장 모르는 것. */
 function worstStars(word) {
-  let worst = 1;
+  let worst = clampStar(word.stars);
   for (const s of word.senses) {
-    worst = Math.max(worst, clampStar(s.stars));
     for (const y of s.synonyms) worst = Math.max(worst, clampStar(y.stars));
   }
   return worst;
@@ -239,12 +274,12 @@ function worstStars(word) {
 function buildEntries() {
   const entries = [];
   for (const w of db.words) {
-    w.senses.forEach((s, si) => {
-      entries.push({ kind: 'head', id: s.id, word: w, sense: s, senseIndex: si, senseTotal: w.senses.length, stars: clampStar(s.stars) });
+    entries.push({ kind: 'head', id: w.id, word: w, stars: clampStar(w.stars) });
+    for (const s of w.senses) {
       for (const y of s.synonyms) {
-        entries.push({ kind: 'syn', id: y.id, word: w, sense: s, syn: y, senseIndex: si, senseTotal: w.senses.length, stars: clampStar(y.stars) });
+        entries.push({ kind: 'syn', id: y.id, word: w, sense: s, syn: y, stars: clampStar(y.stars) });
       }
-    });
+    }
   }
   return entries;
 }
@@ -329,6 +364,7 @@ function route() {
   if (view === 'exam') renderExam();
   else if (view === 'words') renderWords();
   else if (view === 'data') renderData();
+  else if (view === 'import') renderMdImport();
   else if (view === 'edit') renderEdit(parts[1]);
   else renderRegister();
   try { window.scrollTo(0, 0); } catch (_) { /* ignore */ }
@@ -472,7 +508,7 @@ function drawForm() {
       '<button type="button" class="btn btn-secondary" data-act="add-sense">+ 다른 뜻 추가</button>' +
       '<p class="hint">' + (isEdit
         ? '기존 뜻과 유의어를 고쳐도 별점과 시험 기록은 유지됩니다. 뜻이나 유의어를 삭제하면 그 기록도 함께 사라집니다.'
-        : '예문 속 표제어는 저장할 때 자동으로 찾아 빈칸 문제로 만들어집니다. 뜻과 유의어는 모두 각각 시험에 나옵니다.') + '</p>' +
+        : '예문 속 표제어는 저장할 때 자동으로 찾아 빈칸 문제로 만들어집니다. 표제어는 한국어 뜻(뜻 개수만큼 빈칸)과 예문 빈칸으로, 유의어는 한국어 뜻으로 시험에 나옵니다.') + '</p>' +
       errorBanner() +
       '<div class="row">' +
         '<button class="btn" type="submit" id="submit-btn">' + (isEdit ? '수정 저장' : '단어 등록') + '</button>' +
@@ -624,7 +660,7 @@ function makeSenseRecord(headword, input, old) {
     const prev = old && y.id ? old.synonyms.find((o) => o.id === y.id) : null;
     return { id: prev ? prev.id : uid(), text: y.text, stars: prev ? clampStar(prev.stars) : 3 };
   });
-  return { id: old ? old.id : uid(), meaning: input.meaning, stars: old ? clampStar(old.stars) : 3, examples, synonyms };
+  return { id: old ? old.id : uid(), meaning: input.meaning, examples, synonyms };
 }
 
 function submitForm() {
@@ -665,7 +701,7 @@ function submitForm() {
   const now = nowIso();
 
   if (f.mode === 'new') {
-    const word = { id: uid(), headword, day: f.day, created_at: now, updated_at: now, senses: [] };
+    const word = { id: uid(), headword, day: f.day, created_at: now, updated_at: now, stars: 3, senses: [] };
     word.senses = cleaned.map((s) => makeSenseRecord(headword, s, null));
     db.words.push(word);
     if (!saveDb()) { db.words.pop(); return failForm('저장에 실패했습니다. 백업 탭에서 내보내기를 먼저 해두세요.'); }
@@ -695,8 +731,8 @@ function submitForm() {
   });
 
   // 사라진 뜻/유의어의 시험 기록을 정리한다.
-  const keep = new Set();
-  word.senses.forEach((s) => { keep.add(s.id); s.synonyms.forEach((y) => keep.add(y.id)); });
+  const keep = new Set([word.id]);
+  word.senses.forEach((s) => s.synonyms.forEach((y) => keep.add(y.id)));
   db.attempts = db.attempts.filter((a) => a.wordId !== word.id || keep.has(a.entryId));
 
   if (!saveDb()) {
@@ -824,7 +860,7 @@ function wordCardHtml(w, tab) {
 
   let detail = '';
   if (open) {
-    detail = '<div class="card-detail">' + w.senses.map((s, i) => {
+    detail = '<div class="card-detail"><div class="row between"><span class="label" style="margin:0">표제어 별점</span><span class="stars" style="font-size:0.9rem">' + starsLabel(clampStar(w.stars)) + '</span></div>' + w.senses.map((s, i) => {
       const syns = s.synonyms.length
         ? '<div style="margin-top:8px"><div class="label">유의어</div><ul class="syn-list">' +
           s.synonyms.map((y) => '<li>' + esc(y.text) + ' <span class="stars sm">' + starsLabel(clampStar(y.stars)) + '</span></li>').join('') + '</ul></div>'
@@ -836,7 +872,7 @@ function wordCardHtml(w, tab) {
         : '';
       return '<div class="sense">' +
         '<div class="row between top"><div>' + (n > 1 ? '<span style="color:#9ca3af;font-size:0.85rem;margin-right:6px">' + (i + 1) + '.</span>' : '') + '<strong>' + esc(s.meaning) + '</strong></div>' +
-        '<span class="stars" style="font-size:0.9rem">' + starsLabel(clampStar(s.stars)) + '</span></div>' + syns + exs + '</div>';
+        '</div>' + syns + exs + '</div>';
     }).join('') +
     '<div class="row">' +
       '<a class="btn btn-secondary sm" href="#/edit/' + esc(w.id) + '">수정</a>' +
@@ -897,22 +933,25 @@ const listHandlers = {
 
 /* =====================================================================
  * 3. 시험
- *    - 표제어: 한국어 뜻 문제 + 예문 빈칸 문제 (기존과 동일)
- *    - 유의어: 한국어 뜻만 묻는다
- *    - 출제는 별 개수를 가중치로 뽑고, 채점과 별점 갱신은 기존 방식 그대로
+ *    - 표제어 항목(단어당 1개)
+ *        · 한국어 뜻 문제: 뜻의 개수만큼 빈칸이 생기고, 전부 맞아야 정답
+ *        · 예문 빈칸 문제: TOEFL "Complete the Words" 방식. 단어의 앞 절반이 주어지고
+ *          빠진 글자를 쓴다 (글자 수가 홀수면 앞쪽을 내림해서 보여준다)
+ *    - 유의어 항목(유의어당 1개): 그 유의어가 속한 뜻의 한국어 하나만 묻는다
+ *    - 출제는 항목의 별 개수를 가중치로 뽑고, 채점과 별점 계산은 기존 규칙 그대로
  * ===================================================================== */
 
 /**
- * 가중치 추첨. 별 개수가 곧 가중치라 별 3개 항목은 별 1개 항목보다 3배 자주 나온다.
- *  - 쿨다운: 같은 "뜻"(표제어와 그 뜻의 유의어들)이 바로 이어서 나오지 않게 한다.
- *    표제어 직후에 그 유의어가 나오면 앞 문제의 정답이 그대로 힌트가 되기 때문이다.
+ * 가중치 추첨. 별 개수가 곧 가중치라 별 3개 항목은 별 1개 항목보다 자주 나온다.
+ *  - 쿨다운: 같은 단어의 항목(표제어와 그 유의어들)이 바로 이어서 나오지 않게 한다.
+ *    표제어 직후에 유의어가 나오면 앞 문제의 정답이 힌트가 되기 때문이다.
  *  - 상한: 한 항목은 한 시험에 MAX_REPEATS_PER_ENTRY번까지만 나온다.
  *  상한 때문에 45문제를 못 채우면 같은 문제를 반복하지 않고 짧은 시험으로 끝낸다.
  */
 function pickWeighted(entries, count, maxPerEntry) {
   if (entries.length === 0) return [];
-  const senseCount = new Set(entries.map((e) => e.sense.id)).size;
-  const cooldown = Math.max(1, Math.min(8, Math.floor(senseCount / 3)));
+  const groupCount = new Set(entries.map((e) => e.word.id)).size;
+  const cooldown = Math.max(1, Math.min(8, Math.floor(groupCount / 3)));
   const times = new Map();
   const recent = [];
   const picked = [];
@@ -920,7 +959,7 @@ function pickWeighted(entries, count, maxPerEntry) {
   for (let i = 0; i < count; i++) {
     const underCap = entries.filter((e) => (times.get(e.id) || 0) < maxPerEntry);
     if (underCap.length === 0) break;
-    const offCooldown = underCap.filter((e) => !recent.includes(e.sense.id));
+    const offCooldown = underCap.filter((e) => !recent.includes(e.word.id));
     const pool = offCooldown.length > 0 ? offCooldown : underCap;
 
     const total = pool.reduce((sum, e) => sum + e.stars, 0);
@@ -932,55 +971,69 @@ function pickWeighted(entries, count, maxPerEntry) {
     }
     picked.push(chosen);
     times.set(chosen.id, (times.get(chosen.id) || 0) + 1);
-    recent.push(chosen.sense.id);
+    recent.push(chosen.word.id);
     if (recent.length > cooldown) recent.shift();
   }
   return picked;
 }
 
-function blankableExample(sense) {
-  return sense.examples.find((x) => x.end > x.start) || null;
+/** 빈칸 문제로 낼 수 있는 예문(표제어 위치를 찾은 것). 같은 문장이 두 뜻에 있으면 한 번만 센다. */
+function blankableExamples(word) {
+  const seen = new Set();
+  const out = [];
+  for (const s of word.senses) {
+    for (const x of s.examples) {
+      if (x.end > x.start && !seen.has(x.sentence)) { seen.add(x.sentence); out.push(x); }
+    }
+  }
+  return out;
 }
 
-/** 이 항목이 낼 수 있는 문제 유형. 유의어는 뜻만, 표제어는 뜻 + (가능하면) 빈칸. */
+/** 이 항목이 낼 수 있는 문제 유형. 유의어는 뜻만, 표제어는 뜻 + (가능하면) 예문 빈칸. */
 function typesFor(entry) {
   if (entry.kind === 'syn') return ['meaning_write'];
-  return blankableExample(entry.sense) ? ['meaning_write', 'blank_fill'] : ['meaning_write'];
+  return blankableExamples(entry.word).length > 0 ? ['meaning_write', 'blank_fill'] : ['meaning_write'];
 }
 
-function buildQuestion(entry, offset) {
-  const { word, sense } = entry;
-  const types = typesFor(entry);
-  const type = types[offset % types.length];
-  const base = { entryId: entry.id, wordId: word.id, kind: entry.kind, type, senseIndex: entry.senseIndex, senseTotal: entry.senseTotal };
-
-  if (entry.kind === 'syn') {
-    return Object.assign(base, { term: entry.syn.text, correctMeaning: sense.meaning, fromHeadword: word.headword });
-  }
-
-  if (type === 'blank_fill') {
-    const ex = blankableExample(sense);
-    const hint = buildBlankHint(ex.matched);
-    return Object.assign(base, {
-      term: word.headword,
-      blankedSentence: buildBlankedSentence(ex.sentence, ex.start, ex.end, hint.placeholder),
-      correct: ex.matched,
-      hintPrefix: hint.prefix,
-      answerLength: hint.length,
-    });
-  }
-
-  return Object.assign(base, {
-    term: word.headword,
-    correctMeaning: sense.meaning,
-    // 뜻이 여러 개인 단어는 예문으로 어느 뜻을 묻는지 알려준다. 예문이 없으면 번호로 안내한다.
-    contextSentence: entry.senseTotal > 1 && sense.examples[0] ? sense.examples[0].sentence : undefined,
-    otherMeanings: word.senses.filter((s) => s !== sense).map((s) => s.meaning),
+/**
+ * TOEFL Complete the Words 방식의 빈칸. 단어마다 앞 절반(글자 수가 홀수면 내림)을 보여주고
+ * 나머지 글자 수만큼 칸을 만든다. 두 단어 이상(account for)이면 단어마다 따로 적용한다.
+ */
+function blankParts(surface) {
+  return surface.trim().split(/\s+/).map((token) => {
+    const chars = Array.from(token);
+    const show = Math.floor(chars.length / 2);
+    return { full: token, prefix: chars.slice(0, show).join(''), hide: chars.length - show };
   });
 }
 
+function buildQuestion(entry, offset) {
+  const w = entry.word;
+  const types = typesFor(entry);
+  const type = types[offset % types.length];
+  const base = { entryId: entry.id, wordId: w.id, kind: entry.kind, type };
+
+  if (entry.kind === 'syn') {
+    return Object.assign(base, { term: entry.syn.text, answers: [entry.sense.meaning], fromHeadword: w.headword });
+  }
+
+  if (type === 'blank_fill') {
+    const list = blankableExamples(w);
+    const ex = list[Math.floor(Math.random() * list.length)];
+    return Object.assign(base, {
+      term: w.headword,
+      before: ex.sentence.slice(0, ex.start),
+      after: ex.sentence.slice(ex.end),
+      parts: blankParts(ex.sentence.slice(ex.start, ex.end)),
+    });
+  }
+
+  // 뜻 문제: 뜻 하나당 빈칸 하나. 전부 맞아야 정답이다.
+  return Object.assign(base, { term: w.headword, answers: w.senses.map((s) => s.meaning) });
+}
+
 let exam = null; // { questions, index, answers, done, correct }
-let qui = { text: '', revealed: false };
+let qui = { texts: [], revealed: false };
 
 function renderExam() {
   viewHandlers = examHandlers;
@@ -995,11 +1048,11 @@ function drawExamIntro() {
   const syns = entries.length - heads;
   $app.innerHTML =
     '<h1 class="h1">시험</h1>' +
-    '<p class="muted" style="margin-bottom:0.5rem">별점 가중치를 반영해 한 번에 ' + EXAM_SIZE + '문제를 출제합니다. 표제어는 한국어 뜻과 예문 빈칸으로, 유의어는 한국어 뜻만 묻습니다.</p>' +
+    '<p class="muted" style="margin-bottom:0.5rem">별점 가중치를 반영해 한 번에 ' + EXAM_SIZE + '문제를 출제합니다. 표제어는 한국어 뜻(뜻 개수만큼 빈칸)과 예문 빈칸으로, 유의어는 한국어 뜻만 묻습니다.</p>' +
     '<p class="muted small" style="margin-bottom:1rem">등록된 항목이 적으면 같은 문제가 반복되지 않도록 문제 수가 자동으로 줄어듭니다.</p>' +
     (entries.length === 0
       ? '<p style="margin-bottom:1rem">시험을 만들 수 있는 단어가 없습니다. 단어를 먼저 등록해주세요.</p><a class="btn" href="#/register">단어 등록하기</a>'
-      : '<p class="small" style="margin-bottom:1rem">출제 대상: 표제어(뜻) ' + heads + '개 · 유의어 ' + syns + '개</p><button class="btn" data-act="start">시험 시작</button>');
+      : '<p class="small" style="margin-bottom:1rem">출제 대상: 표제어 ' + heads + '개 · 유의어 ' + syns + '개</p><button class="btn" data-act="start">시험 시작</button>');
 }
 
 function startExam() {
@@ -1008,7 +1061,6 @@ function startExam() {
   const chosen = pickWeighted(entries, EXAM_SIZE, MAX_REPEATS_PER_ENTRY);
 
   // 항목마다 시작 유형을 무작위로 잡고, 다시 나올 때는 다음 유형으로 돌린다.
-  // 같은 항목이 같은 방식으로 두 번 나오는 것도, 한 유형만 몰리는 것도 막는다.
   const rotation = new Map();
   const questions = chosen.map((entry) => {
     let st = rotation.get(entry.id);
@@ -1022,69 +1074,73 @@ function startExam() {
   });
 
   exam = { questions, index: 0, answers: [], done: false, correct: 0 };
-  qui = { text: '', revealed: false };
+  qui = { texts: [], revealed: false };
   drawExamQuestion();
 }
 
-function senseTagHtml(q) {
-  return q.kind === 'head' && q.senseTotal > 1 ? '<div class="sense-tag">뜻 ' + (q.senseIndex + 1) + ' / ' + q.senseTotal + '</div>' : '';
-}
-
-function otherMeaningsHtml(q) {
-  if (q.kind === 'syn') {
-    // 정답을 확인하는 순간이 유의어가 어느 표제어의 것이었는지 되새기기 좋은 때다.
-    return '<div class="other"><span class="muted">표제어: </span>' + esc(q.fromHeadword) + '</div>';
+function answerInputs(n) {
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    html += '<div class="row" style="margin-bottom:6px">' +
+      (n > 1 ? '<span class="muted small" style="width:1.4rem">' + (i + 1) + '.</span>' : '') +
+      '<input class="input" data-f="ans" data-i="' + i + '" value="' + esc(qui.texts[i] || '') + '"' +
+      (n > 1 ? ' placeholder="뜻 ' + (i + 1) + '"' : '') + ' autocomplete="off" autocapitalize="off" spellcheck="false"></div>';
   }
-  if (!q.otherMeanings || q.otherMeanings.length === 0) return '';
-  return '<div class="other"><span class="muted">' + esc(q.term) + '의 다른 뜻: </span>' + esc(q.otherMeanings.join(' · ')) + '</div>';
+  return html + '<button class="btn" data-act="submit-text">확인</button>';
 }
 
-function answerRow(placeholder) {
+function selfCheckRow(n) {
   return '<div class="row">' +
-    '<input class="input" data-f="ans" value="' + esc(qui.text) + '" autocomplete="off" autocapitalize="off" spellcheck="false"' + (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '>' +
-    '<button class="btn" data-act="submit-text">확인</button></div>';
-}
-
-function selfCheckRow() {
-  return '<div class="row">' +
-    '<button class="btn" data-act="mark" data-v="1">맞았어요</button>' +
+    '<button class="btn" data-act="mark" data-v="1">' + (n > 1 ? '전부 맞았어요' : '맞았어요') + '</button>' +
     '<button class="btn btn-secondary" data-act="mark" data-v="0">틀렸어요</button></div>';
 }
 
+/** 문장 속 빈칸. 앞 절반은 글자로, 나머지는 글자 수만큼의 입력 칸으로 보여준다. */
+function blankSentenceHtml(q) {
+  let mid;
+  if (!qui.revealed) {
+    mid = q.parts.map((p, i) =>
+      '<span class="cw"><span class="cw-pre">' + esc(p.prefix) + '</span>' +
+      '<input class="cw-in" data-f="ans" data-i="' + i + '" data-max="' + p.hide + '" maxlength="' + p.hide + '"' +
+      ' placeholder="' + '_'.repeat(p.hide) + '" style="width:' + (p.hide * 0.85 + 0.6) + 'em"' +
+      ' value="' + esc(qui.texts[i] || '') + '" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></span>').join(' ');
+  } else {
+    mid = '<strong>' + esc(q.parts.map((p) => p.full).join(' ')) + '</strong>';
+  }
+  return esc(q.before) + mid + esc(q.after);
+}
+
 function drawExamQuestion() {
-  const q = exam.questions[exam.index];
+  const q = currentQuestion();
   let body;
 
   if (q.type === 'blank_fill') {
+    const typedParts = q.parts.map((p, i) => p.prefix + (qui.texts[i] || '').replace(/\s+/g, ''));
+    const anyTyped = qui.texts.some((t) => t && t.trim());
     body =
-      senseTagHtml(q) +
-      '<p style="margin:0 0 10px">빈칸에 들어갈 단어를 쓰세요.</p>' +
-      '<p style="margin:0 0 10px;line-height:1.8;font-size:1.05rem">' + esc(q.blankedSentence) + '</p>' +
-      (q.hintPrefix ? '<p class="muted small" style="margin:0 0 12px">' + esc(q.hintPrefix) + '(으)로 시작하는 ' + q.answerLength + '글자</p>' : '') +
+      '<p style="margin:0 0 10px">빈칸에 들어갈 단어의 나머지 글자를 쓰세요.</p>' +
+      '<p class="sentence">' + blankSentenceHtml(q) + '</p>' +
       (!qui.revealed
-        ? answerRow()
-        : '<p class="muted" style="margin:0 0 6px">내가 쓴 답: ' + (qui.text ? esc(qui.text) : '(빈칸)') + '</p>' +
-          '<p style="margin:0 0 12px">정답: <strong>' + esc(q.correct) + '</strong></p>' + selfCheckRow());
-  } else if (q.kind === 'syn') {
-    body =
-      '<p style="margin:0 0 10px"><strong>' + esc(q.term) + '</strong>의 뜻을 한글로 쓰세요.</p>' +
-      (!qui.revealed
-        ? answerRow()
-        : '<p class="muted" style="margin:0 0 6px">내가 쓴 답: ' + (qui.text ? esc(qui.text) : '(빈칸)') + '</p>' +
-          '<p style="margin:0 0 10px">정답: <strong>' + esc(q.correctMeaning) + '</strong></p>' +
-          otherMeaningsHtml(q) + selfCheckRow());
+        ? '<p class="muted small" style="margin:0 0 12px">단어의 앞 절반이 주어집니다. 빠진 글자만 쓰면 됩니다.</p><button class="btn" data-act="submit-text">확인</button>'
+        : '<p class="muted" style="margin:0 0 6px">내가 쓴 답: ' + (anyTyped ? esc(typedParts.join(' ')) : '(빈칸)') + '</p>' +
+          '<p style="margin:0 0 12px">정답: <strong>' + esc(q.parts.map((p) => p.full).join(' ')) + '</strong></p>' + selfCheckRow(1));
   } else {
-    const head = q.contextSentence
-      ? '<p style="margin:0 0 8px">다음 문장에서 쓰인 뜻을 한글로 쓰세요.</p><p class="quote">' + esc(q.contextSentence) + '</p><p style="margin:0 0 10px"><strong>' + esc(q.term) + '</strong></p>'
-      : '<p style="margin:0 0 10px"><strong>' + esc(q.term) + '</strong>의 뜻을 한글로 쓰세요.' +
-        (q.senseTotal > 1 ? '<span class="muted small"> (여러 뜻 중 ' + (q.senseIndex + 1) + '번째)</span>' : '') + '</p>';
+    const n = q.answers.length;
+    const mine = q.answers.map((_, i) => (qui.texts[i] || '').trim());
+    const mineHtml = mine.some(Boolean)
+      ? mine.map((t, i) => (n > 1 ? (i + 1) + '. ' : '') + (t ? esc(t) : '(빈칸)')).join('<br>')
+      : '(빈칸)';
+    const ansHtml = q.answers.map((a, i) => (n > 1 ? (i + 1) + '. ' : '') + '<strong>' + esc(a) + '</strong>').join('<br>');
     body =
-      senseTagHtml(q) + head +
+      '<p style="margin:0 0 10px"><strong>' + esc(q.term) + '</strong>의 뜻을 한글로 쓰세요.' +
+      (n > 1 ? '<span class="muted small"> (뜻 ' + n + '개)</span>' : '') + '</p>' +
       (!qui.revealed
-        ? answerRow()
-        : '<p class="muted" style="margin:0 0 6px">내가 쓴 답: ' + (qui.text ? esc(qui.text) : '(빈칸)') + '</p>' +
-          '<p style="margin:0 0 10px">정답: <strong>' + esc(q.correctMeaning) + '</strong></p>' +
-          otherMeaningsHtml(q) + selfCheckRow());
+        ? answerInputs(n)
+        : '<p class="muted small" style="margin:0 0 4px">내가 쓴 답</p><p style="margin:0 0 10px">' + mineHtml + '</p>' +
+          '<p class="muted small" style="margin:0 0 4px">정답</p><p style="margin:0 0 12px">' + ansHtml + '</p>' +
+          // 정답을 확인하는 순간이 유의어가 어느 표제어의 것이었는지 되새기기 좋은 때다.
+          (q.kind === 'syn' ? '<div class="other"><span class="muted">표제어: </span>' + esc(q.fromHeadword) + '</div>' : '') +
+          selfCheckRow(n));
   }
 
   $app.innerHTML =
@@ -1102,10 +1158,10 @@ function currentQuestion() { return exam.questions[exam.index]; }
 
 function answerCurrent(isCorrect) {
   const q = currentQuestion();
-  exam.answers.push({ entryId: q.entryId, wordId: q.wordId, correct: isCorrect, answer: qui.text, type: q.type });
+  exam.answers.push({ entryId: q.entryId, wordId: q.wordId, correct: isCorrect, answer: qui.texts.map((t) => (t || '').trim()).join(' / '), type: q.type });
   if (isCorrect) exam.correct++;
   exam.index++;
-  qui = { text: '', revealed: false };
+  qui = { texts: [], revealed: false };
   if (exam.index >= exam.questions.length) finishExam();
   else drawExamQuestion();
 }
@@ -1131,7 +1187,7 @@ function finishExam() {
   touched.forEach((id) => {
     const e = lookup.get(id);
     const stars = calcStars(historyOf(id));
-    if (e.kind === 'head') e.sense.stars = stars; else e.syn.stars = stars;
+    if (e.kind === 'head') e.word.stars = stars; else e.syn.stars = stars;
   });
 
   saveDb();
@@ -1152,10 +1208,10 @@ function drawExamResult() {
 function submitText() {
   const q = currentQuestion();
   if (qui.revealed) return;
-  // 빈칸 문제는 정확히 맞으면 자가 채점 없이 바로 정답 처리한다.
-  if (q.type === 'blank_fill' && qui.text.trim().toLowerCase() === q.correct.trim().toLowerCase()) {
-    answerCurrent(true);
-    return;
+  // 빈칸 문제는 글자가 정확히 맞으면 자가 채점 없이 바로 정답 처리한다.
+  if (q.type === 'blank_fill') {
+    const exact = q.parts.every((p, i) => (p.prefix + (qui.texts[i] || '').replace(/\s+/g, '')).toLowerCase() === p.full.toLowerCase());
+    if (exact) { answerCurrent(true); return; }
   }
   qui.revealed = true;
   drawExamQuestion();
@@ -1174,11 +1230,255 @@ const examHandlers = {
     }
   },
   input(e) {
-    if (e.target.dataset && e.target.dataset.f === 'ans') qui.text = e.target.value;
+    const t = e.target;
+    if (!t.dataset || t.dataset.f !== 'ans') return;
+    const i = Number(t.dataset.i);
+    qui.texts[i] = t.value;
+    // 빈칸을 다 채우면 다음 단어 칸으로 넘어간다.
+    const max = Number(t.dataset.max);
+    if (max && t.value.length >= max) {
+      const next = $('[data-f="ans"][data-i="' + (i + 1) + '"]', $app);
+      if (next) next.focus();
+    }
   },
   keydown(e) {
     if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
-    if (e.target.dataset && e.target.dataset.f === 'ans') { e.preventDefault(); submitText(); }
+    const t = e.target;
+    if (!t.dataset || t.dataset.f !== 'ans') return;
+    e.preventDefault();
+    const next = $('[data-f="ans"][data-i="' + (Number(t.dataset.i) + 1) + '"]', $app);
+    if (next) next.focus(); else submitText();
+  },
+};
+
+/* =====================================================================
+ * 3-2. md로 단어 등록
+ *
+ *   # DAY 1                      DAY 표시. 다음 DAY 표시가 나올 때까지 아래 단어에 적용
+ *   ## exploit                   표제어
+ *   - 뜻: (부당하게) 이용하다      한국어 뜻. 뜻마다 이 줄을 반복한다
+ *     - 유의어: utilize, use     그 뜻의 유의어 (쉼표로 구분)
+ *     - 예문: Human rights ...   그 뜻의 예문 (여러 줄 가능)
+ * ===================================================================== */
+const MD_SAMPLE = [
+  '# DAY 1',
+  '',
+  '## assure',
+  '- 뜻: 확신시키다',
+  '  - 유의어: convince, persuade, satisfy',
+  '  - 예문: The lawyer assured Tim that all his rights would be respected.',
+  '- 뜻: 보장하다',
+  '  - 유의어: guarantee',
+  '  - 예문: The lawyer assured Tim that all his rights would be respected.',
+].join('\n');
+
+function parseVocabMd(text) {
+  const out = { words: [], errors: [], warnings: [] };
+  const lines = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
+  let day = null;
+  let word = null;
+  let sense = null;
+  let inComment = false;
+
+  const finish = () => {
+    if (!word) return;
+    if (word.senses.length === 0) out.errors.push(word.line + '번째 줄: "' + word.headword + '"에 뜻(- 뜻: ...)이 없어 건너뜁니다.');
+    else out.words.push(word);
+    word = null;
+    sense = null;
+  };
+
+  lines.forEach((raw, idx) => {
+    const n = idx + 1;
+    const line = raw.trim();
+    if (inComment) { if (line.includes('-->')) inComment = false; return; }
+    if (line.startsWith('<!--')) { if (!line.includes('-->')) inComment = true; return; }
+    if (!line) return;
+
+    let m = /^##\s+(.+)$/.exec(line);
+    if (m) {
+      finish();
+      word = { headword: normaliseHeadword(m[1]), day, line: n, senses: [] };
+      return;
+    }
+    m = /^#\s+(.+)$/.exec(line);
+    if (m) {
+      const d = /DAY\s*(\d+)/i.exec(m[1]);
+      if (d) {
+        finish();
+        day = validDay(d[1]);
+        if (day == null) out.errors.push(n + '번째 줄: DAY는 1~' + DAY_COUNT + ' 사이여야 합니다 (' + d[1] + '). 이 아래 단어는 DAY 없이 처리됩니다.');
+      }
+      return;
+    }
+
+    m = /^[-*+]\s*(뜻|유의어|예문)\s*[:：]\s*(.*)$/.exec(line);
+    if (!m) { out.warnings.push(n + '번째 줄: 알아보지 못해 무시했습니다 → ' + (line.length > 40 ? line.slice(0, 40) + '…' : line)); return; }
+
+    const key = m[1];
+    const val = m[2].trim();
+    if (!word) { out.errors.push(n + '번째 줄: "## 표제어" 없이 "' + key + '"이(가) 나왔습니다.'); return; }
+
+    if (key === '뜻') {
+      if (!val) { out.errors.push(n + '번째 줄: "' + word.headword + '"의 뜻이 비어 있습니다.'); sense = null; return; }
+      if (/[;；]/.test(val)) out.warnings.push(n + '번째 줄: 뜻에 ";"가 있습니다. ";"로 나뉜 뜻은 "- 뜻:" 줄을 나눠서 적어주세요 → ' + val);
+      sense = { meaning: val, synonyms: [], examples: [], line: n };
+      word.senses.push(sense);
+      return;
+    }
+    if (!sense) { out.errors.push(n + '번째 줄: "' + word.headword + '"에서 "- 뜻:" 앞에 "' + key + '"이(가) 나왔습니다.'); return; }
+    if (key === '유의어') {
+      const seen = new Set(sense.synonyms.map((s) => s.toLowerCase()));
+      val.split(/[,;，]/).map((s) => s.trim().replace(/\s+/g, ' ')).filter(Boolean).forEach((s) => {
+        if (!seen.has(s.toLowerCase())) { seen.add(s.toLowerCase()); sense.synonyms.push(s); }
+      });
+    } else if (val) {
+      sense.examples.push(val);
+    }
+  });
+  finish();
+  return out;
+}
+
+const mdUi = { text: '', fallbackDay: '', parsed: null, info: null, done: null };
+
+function renderMdImport() {
+  $app.innerHTML =
+    '<h1 class="h1">md로 단어 등록</h1>' +
+    '<p class="muted small" style="margin:0 0 6px;line-height:1.6">아래 형식의 md를 넣으면 단어가 한꺼번에 등록됩니다. 뜻마다 "- 뜻:" 줄을 따로 쓰고, 그 아래에 그 뜻의 유의어와 예문을 적습니다.</p>' +
+    '<pre class="card soft small" style="white-space:pre-wrap;margin:0 0 1rem;font-size:0.8rem">' + esc(MD_SAMPLE) + '</pre>' +
+    '<div class="card stack">' +
+      '<div><label class="label" for="md-file">md 파일 선택 (.md, .txt)</label><input type="file" id="md-file" accept=".md,.txt,text/markdown,text/plain"></div>' +
+      '<div><label class="label" for="md-text">또는 내용을 붙여넣기</label>' +
+        '<textarea class="input mono" id="md-text" rows="12" spellcheck="false" placeholder="# DAY 1&#10;&#10;## exploit&#10;- 뜻: ...">' + esc(mdUi.text) + '</textarea></div>' +
+      '<div><label class="label" for="md-day">DAY 표시(# DAY n)가 없는 단어에 넣을 DAY</label>' +
+        '<select class="input" id="md-day"><option value="">미분류</option>' +
+        dayList().map((n) => '<option value="' + n + '"' + (String(n) === mdUi.fallbackDay ? ' selected' : '') + '>DAY ' + n + '</option>').join('') + '</select></div>' +
+      '<div><button class="btn" data-act="md-parse">분석하기</button></div>' +
+    '</div>' +
+    '<div id="md-out"></div>';
+  drawMdOut();
+  viewHandlers = mdHandlers;
+}
+
+function analyseMd() {
+  if (!mdUi.text.trim()) { mdUi.parsed = null; mdUi.info = null; mdUi.done = null; drawMdOut('내용이 비어 있습니다.'); return; }
+  const parsed = parseVocabMd(mdUi.text);
+  const existing = new Set(db.words.map((w) => normaliseHeadword(w.headword).toLowerCase()));
+  const toAdd = [];
+  const dups = [];
+  for (const w of parsed.words) {
+    const key = w.headword.toLowerCase();
+    if (existing.has(key)) dups.push(w.headword);
+    else { existing.add(key); toAdd.push(w); }
+  }
+  let senses = 0, syns = 0, exs = 0;
+  const unmatched = [];
+  for (const w of toAdd) {
+    w.senses.forEach((s, i) => {
+      senses++; syns += s.synonyms.length; exs += s.examples.length;
+      for (const sentence of s.examples) {
+        if (!findHeadwordInSentence(w.headword, sentence)) unmatched.push(w.headword + (w.senses.length > 1 ? ' (뜻 ' + (i + 1) + ')' : ''));
+      }
+    });
+  }
+  mdUi.parsed = parsed;
+  mdUi.info = { toAdd, dups, unmatched, senses, syns, exs };
+  mdUi.done = null;
+  drawMdOut();
+}
+
+function mdList(items, max) {
+  const shown = items.slice(0, max).map((s) => '<li>' + esc(s) + '</li>').join('');
+  return '<ul class="md-list">' + shown + (items.length > max ? '<li>외 ' + (items.length - max) + '개</li>' : '') + '</ul>';
+}
+
+function drawMdOut(message) {
+  const box = $('#md-out');
+  if (!box) return;
+  if (mdUi.done) {
+    box.innerHTML = '<div class="notice ok" style="margin-top:12px"><strong>단어 ' + mdUi.done.added + '개를 등록했습니다.</strong>' +
+      (mdUi.done.skipped ? '<p class="small" style="margin:6px 0 0">이미 등록된 표제어 ' + mdUi.done.skipped + '개는 건너뛰었습니다.</p>' : '') +
+      '<p class="small" style="margin:6px 0 0"><a href="#/words">등록된 단어 보기</a></p></div>';
+    return;
+  }
+  if (message) { box.innerHTML = '<div class="notice err" style="margin-top:12px">' + esc(message) + '</div>'; return; }
+  if (!mdUi.parsed) { box.innerHTML = ''; return; }
+
+  const { toAdd, dups, unmatched, senses, syns, exs } = mdUi.info;
+  const p = mdUi.parsed;
+  const fb = validDay(mdUi.fallbackDay);
+  const byDay = new Map();
+  toAdd.forEach((w) => { const d = w.day != null ? w.day : fb; byDay.set(d, (byDay.get(d) || 0) + 1); });
+  const dayText = Array.from(byDay.entries()).sort((a, b) => (a[0] == null) - (b[0] == null) || a[0] - b[0])
+    .map(([d, c]) => (d == null ? '미분류' : 'DAY ' + d) + ' ' + c + '개').join(', ');
+
+  let html = '<div class="card" style="margin-top:12px"><strong>분석 결과</strong>' +
+    '<p class="small" style="margin:6px 0 0;line-height:1.7">등록할 단어 <strong>' + toAdd.length + '개</strong> · 뜻 ' + senses + '개 · 유의어 ' + syns + '개 · 예문 ' + exs + '개' +
+    (dayText ? '<br>' + esc(dayText) : '') + '</p>';
+  if (dups.length) html += '<p class="small" style="margin:8px 0 0">이미 등록되어 건너뛸 단어 ' + dups.length + '개</p>' + mdList(dups, 10);
+  if (p.errors.length) html += '<p class="small" style="margin:8px 0 0;color:#b91c1c">오류 ' + p.errors.length + '개 (해당 부분은 등록되지 않습니다)</p>' + mdList(p.errors, 10);
+  if (p.warnings.length) html += '<p class="small" style="margin:8px 0 0;color:#92400e">확인 필요 ' + p.warnings.length + '개</p>' + mdList(p.warnings, 10);
+  if (unmatched.length) html += '<p class="small" style="margin:8px 0 0;color:#92400e">예문에서 표제어를 자동으로 찾지 못함 ' + unmatched.length + '개 (카드에는 보이지만 빈칸 문제에서는 빠집니다)</p>' + mdList(unmatched, 10);
+  html += '<div style="margin-top:12px"><button class="btn" data-act="md-apply"' + (toAdd.length === 0 ? ' disabled' : '') + '>' + toAdd.length + '개 단어 등록하기</button></div></div>';
+  box.innerHTML = html;
+}
+
+function applyMd() {
+  if (!mdUi.info || mdUi.info.toAdd.length === 0) return;
+  const { toAdd, dups } = mdUi.info;
+  const fallback = validDay(mdUi.fallbackDay);
+  const now = nowIso(); // 같은 시각으로 넣어서 목록에서 md의 순서가 그대로 유지된다
+  const added = toAdd.map((pw) => ({
+    id: uid(),
+    headword: pw.headword,
+    day: pw.day != null ? pw.day : fallback,
+    created_at: now,
+    updated_at: now,
+    stars: 3,
+    senses: pw.senses.map((s) => makeSenseRecord(pw.headword, {
+      id: null, meaning: s.meaning, synonyms: s.synonyms.map((t) => ({ id: null, text: t })), examples: s.examples,
+    }, null)),
+  }));
+  db.words.push(...added);
+  if (!saveDb()) { db.words = db.words.filter((w) => !added.includes(w)); return; }
+  mdUi.done = { added: added.length, skipped: dups.length };
+  mdUi.parsed = null; mdUi.info = null; mdUi.text = '';
+  const ta = $('#md-text');
+  if (ta) ta.value = '';
+  drawMdOut();
+}
+
+const mdHandlers = {
+  input(e) {
+    if (e.target.id !== 'md-text') return;
+    mdUi.text = e.target.value;
+    mdUi.parsed = null; mdUi.info = null; mdUi.done = null;
+    drawMdOut();
+  },
+  change(e) {
+    if (e.target.id === 'md-day') {
+      mdUi.fallbackDay = e.target.value;
+      if (mdUi.parsed) analyseMd();
+    } else if (e.target.id === 'md-file') {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        mdUi.text = String(reader.result);
+        $('#md-text').value = mdUi.text;
+        analyseMd();
+      };
+      reader.onerror = () => drawMdOut('파일을 읽지 못했습니다.');
+      reader.readAsText(file, 'utf-8');
+      e.target.value = '';
+    }
+  },
+  click(e) {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    if (b.dataset.act === 'md-parse') analyseMd();
+    else if (b.dataset.act === 'md-apply') applyMd();
   },
 };
 
@@ -1252,20 +1552,21 @@ function convertLegacy(old, day) {
       const exRows = orphan ? (old.examples || []).filter((r) => r.word_id === w.id && !r.sense_id) : exBySense.get(sr.id) || [];
       const atts = orphan ? (attemptsByWord.get(w.id) || []).filter((a) => !a.sense_id) : attemptsBySense.get(sr.id) || [];
       atts.forEach((a) => attempts.push({
-        id: a.id || uid(), entryId: sr.id, wordId: w.id, correct: !!a.is_correct, answer: a.user_answer || '',
+        id: a.id || uid(), entryId: w.id, wordId: w.id, correct: !!a.is_correct, answer: a.user_answer || '',
         type: null, session: a.session_id || null, at: a.answered_at || nowIso(),
       }));
       return {
         id: sr.id,
         meaning: sr.meaning_ko,
-        stars: clampStar(sr.difficulty_stars),
         examples: exRows.slice().sort(byPos).map((x) => ({ id: x.id || uid(), sentence: x.sentence, matched: x.matched_surface_form, start: x.match_start || 0, end: x.match_end || 0 })),
         // 유의어는 이제 시험 항목이라 별점 3(새 항목)에서 시작한다.
         synonyms: synRows.slice().sort(byPos).map((y) => ({ id: y.id || uid(), text: y.synonym, stars: 3 })),
       };
     });
 
-    words.push({ id: w.id, headword: normaliseHeadword(w.headword), day, created_at: w.created_at || nowIso(), updated_at: w.updated_at || nowIso(), senses });
+    // 표제어 항목은 단어당 하나이므로 별점은 가장 모르는 뜻을 따른다.
+    const stars = senseRows.reduce((m, sr) => Math.max(m, clampStar(sr.difficulty_stars)), 1);
+    words.push({ id: w.id, headword: normaliseHeadword(w.headword), day, created_at: w.created_at || nowIso(), updated_at: w.updated_at || nowIso(), stars, senses });
   }
 
   attempts.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
@@ -1273,8 +1574,8 @@ function convertLegacy(old, day) {
 }
 
 function importParsed(p) {
-  // 이 앱의 백업
-  if (p && p.version === 2 && Array.isArray(p.words) && Array.isArray(p.attempts)) {
+  // 이 앱의 백업 (이전 형식이면 불러오면서 현재 형식으로 올린다)
+  if (p && p.version >= 2 && Array.isArray(p.words) && Array.isArray(p.attempts)) {
     if (!confirm('현재 데이터(단어 ' + db.words.length + '개)가 백업 파일의 내용(단어 ' + p.words.length + '개)으로 통째로 바뀝니다. 계속할까요?')) return;
     db = normaliseDb(p);
     draftForm = null;
